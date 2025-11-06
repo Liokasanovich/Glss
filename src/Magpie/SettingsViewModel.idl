@@ -1,0 +1,22 @@
+namespace Magpie {
+	runtimeclass SettingsViewModel : Windows.UI.Xaml.Data.INotifyPropertyChanged {
+		IVector<IInspectable> Languages { get; };
+		Int32 Language;
+		Boolean RequireRestart { get; };
+		void Restart();
+
+		Int32 Theme;
+		Boolean IsRunAtStartup;
+		Boolean IsPortableMode;
+		void OpenConfigLocation();
+		Boolean IsShowNotifyIcon;
+
+		// Simple / Advanced UI mode
+		Boolean IsSimpleMode;
+		Windows.UI.Xaml.Visibility SimpleModeVisibility { get; };
+		Windows.UI.Xaml.Visibility AdvancedModeVisibility { get; };
+
+		Boolean IsProcessElevated { get; };
+		Boolean IsAlwaysRunAsAdmin;
+	}
+}

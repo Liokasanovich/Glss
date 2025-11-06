@@ -1,0 +1,126 @@
+<Page x:Class="Magpie.SettingsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:local="using:Magpie"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+      mc:Ignorable="d">
+	<local:PageFrame x:Name="SettingsPageFrame">
+		<local:SimpleStackPanel Padding="0,4,0,0"
+		                        HorizontalAlignment="Stretch"
+		                        ChildrenTransitions="{StaticResource SettingsCardsAnimations}"
+		                        Spacing="{StaticResource SettingsGroupSpacing}">
+
+			<!-- UI Mode toggle (compact at top) -->
+			<Grid Margin="0,0,0,8">
+				<Grid.ColumnDefinitions>
+					<ColumnDefinition Width="*" />
+					<ColumnDefinition Width="Auto" />
+				</Grid.ColumnDefinitions>
+				<TextBlock Text="UI Mode" VerticalAlignment="Center" Grid.Column="0" Margin="12,0,0,0" />
+				<ToggleSwitch Grid.Column="1"
+							  OnContent="Simple"
+							  OffContent="Advanced"
+							  IsOn="{x:Bind ViewModel.IsSimpleMode, Mode=TwoWay}"
+							  VerticalAlignment="Center"
+							  Margin="0,0,12,0" />
+			</Grid>
+
+			<local:SettingsGroup x:Uid="Settings_General">
+				<local:SettingsCard x:Uid="Settings_General_Language"
+				                    IsWrapEnabled="True">
+					<local:SettingsCard.HeaderIcon>
+						<FontIcon Glyph="&#xE8C1;" />
+					</local:SettingsCard.HeaderIcon>
+					<ComboBox DropDownOpened="ComboBox_DropDownOpened"
+					          ItemsSource="{x:Bind ViewModel.Languages, Mode=OneTime}"
+					          SelectedIndex="{x:Bind ViewModel.Language, Mode=TwoWay}" />
+				</local:SettingsCard>
+				<muxc:InfoBar x:Uid="Settings_General_RequireRestart"
+				              IsClosable="False"
+				              IsOpen="{x:Bind ViewModel.RequireRestart, Mode=OneWay}"
+				              Severity="Warning">
+					<muxc:InfoBar.ActionButton>
+						<Button x:Uid="Settings_General_RequireRestart_ActionButton"
+						        HorizontalAlignment="Right"
+						        Click="{x:Bind ViewModel.Restart}" />
+					</muxc:InfoBar.ActionButton>
+				</muxc:InfoBar>
+				<local:SettingsCard x:Uid="Settings_General_Theme"
+				                    IsWrapEnabled="True">
+					<local:SettingsCard.HeaderIcon>
+						<FontIcon Glyph="&#xEF1F;" />
+					</local:SettingsCard.HeaderIcon>
+					<ComboBox DropDownOpened="ComboBox_DropDownOpened"
+					          SelectedIndex="{x:Bind ViewModel.Theme, Mode=TwoWay}">
+						<ComboBoxItem x:Uid="Settings_General_Theme_System" />
+						<ComboBoxItem x:Uid="Settings_General_Theme_Light" />
+						<ComboBoxItem x:Uid="Settings_General_Theme_Dark" />
+					</ComboBox>
+				</local:SettingsCard>
+
+                <!-- Advanced mode settings -->
+				<local:SettingsCard x:Uid="Settings_General_PortableMode"
+                                   Visibility="{x:Bind ViewModel.AdvancedModeVisibility, Mode=OneWay}">
+					<local:SettingsCard.HeaderIcon>
+						<FontIcon Glyph="&#xE88E;" />
+					</local:SettingsCard.HeaderIcon>
+					<local:SettingsCard.Description>
+						<HyperlinkButton x:Uid="Settings_General_PortableMode_Locate"
+						                 Click="{x:Bind ViewModel.OpenConfigLocation}" />
+					</local:SettingsCard.Description>
+					<ToggleSwitch x:Uid="ToggleSwitch"
+					              IsOn="{x:Bind ViewModel.IsPortableMode, Mode=TwoWay}" />
+				</local:SettingsCard>
+				<local:SettingsCard x:Uid="Settings_General_ShowNotifyIcon"
+                                   Visibility="{x:Bind ViewModel.AdvancedModeVisibility, Mode=OneWay}">
+					<local:SettingsCard.HeaderIcon>
+						<FontIcon Glyph="&#xE9F5;" />
+					</local:SettingsCard.HeaderIcon>
+					<ToggleSwitch x:Uid="ToggleSwitch"
+					              IsOn="{x:Bind ViewModel.IsShowNotifyIcon, Mode=TwoWay}" />
+				</local:SettingsCard>
+			</local:SettingsGroup>
+
+            <!-- Launch settings group - Advanced only -->
+			<local:SettingsGroup x:Uid="Settings_Launch"
+                                Visibility="{x:Bind ViewModel.AdvancedModeVisibility, Mode=OneWay}">
+				<local:SettingsCard x:Uid="Settings_Launch_RunAtStartup">
+					<local:SettingsCard.HeaderIcon>
+						<FontIcon Glyph="&#xE7B5;" />
+					</local:SettingsCard.HeaderIcon>
+					<ToggleSwitch x:Uid="ToggleSwitch"
+					              IsOn="{x:Bind ViewModel.IsRunAtStartup, Mode=TwoWay}" />
+				</local:SettingsCard>
+				<local:SettingsCard x:Uid="Settings_Launch_AlwaysRunAsAdmin"
+				                    IsEnabled="{x:Bind ViewModel.IsProcessElevated, Mode=OneTime}">
+					<local:SettingsCard.HeaderIcon>
+						<FontIcon Glyph="&#xE7EF;" />
+					</local:SettingsCard.HeaderIcon>
+					<ToggleSwitch x:Uid="ToggleSwitch"
+					              IsOn="{x:Bind ViewModel.IsAlwaysRunAsAdmin, Mode=TwoWay}" />
+				</local:SettingsCard>
+			</local:SettingsGroup>
+
+			<!-- Advanced links: About / Main page -->
+			<local:SettingsGroup x:Uid="Settings_Advanced_Links"
+								Visibility="{x:Bind ViewModel.AdvancedModeVisibility, Mode=OneWay}">
+				<local:SettingsCard x:Uid="Settings_Advanced_Links_About"
+									Click="AboutLink_Click"
+									IsClickEnabled="True">
+					<local:SettingsCard.HeaderIcon>
+						<FontIcon Glyph="&#xE946;" />
+					</local:SettingsCard.HeaderIcon>
+				</local:SettingsCard>
+				<local:SettingsCard x:Uid="Settings_Advanced_Links_Main"
+									Click="MainLink_Click"
+									IsClickEnabled="True">
+					<local:SettingsCard.HeaderIcon>
+						<FontIcon Glyph="&#xE80F;" />
+					</local:SettingsCard.HeaderIcon>
+				</local:SettingsCard>
+			</local:SettingsGroup>
+		</local:SimpleStackPanel>
+	</local:PageFrame>
+</Page>
