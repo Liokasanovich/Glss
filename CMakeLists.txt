@@ -24,6 +24,7 @@ endif()
 
 add_library(glss_core STATIC
     src/vulkan_context.cpp
+    src/vulkan_compute.cpp
     src/frame_interpolator.cpp
     src/super_resolution.cpp
     src/window_capture.cpp

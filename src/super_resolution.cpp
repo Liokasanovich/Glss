@@ -6,6 +6,9 @@
 #include <iostream>
 #include <vector>
 
+#include "glss/vulkan_compute.h"
+#include "shaders/upscale_spv.h"
+
 namespace glss {
 namespace {
 
@@ -61,10 +64,34 @@ bool SuperResolutionEngine::Initialize(UpscaleMethod method, float scale_factor,
     scale_factor_ = (scale_factor > 0.0f) ? scale_factor : 1.0f;
     sharpness_ = sharpness;
 
+    // Bring up the GPU compute backend once. Any failure here (no device,
+    // shader/pipeline creation error, no host-visible memory) silently keeps us
+    // on the CPU path; a runtime dispatch failure is handled per-frame below.
+    if (!gpu_attempted_) {
+        gpu_attempted_ = true;
+        if (vk_ctx_ && vk_ctx_->IsAvailable()) {
+            gpu_ = std::make_unique<VulkanCompute>(*vk_ctx_);
+            if (gpu_->Initialize(kUpscaleSpirv, kUpscaleSpirvSize)) {
+                std::cout << "[GLSS SuperResolution] GPU 计算后端已启用 (Vulkan compute SPIR-V)。"
+                          << std::endl;
+            } else {
+                std::cout << "[GLSS SuperResolution] GPU 计算后端不可用，使用 CPU 路径。"
+                          << std::endl;
+                gpu_.reset();
+            }
+        } else {
+            std::cout << "[GLSS SuperResolution] Vulkan 上下文不可用，使用 CPU 路径。" << std::endl;
+        }
+    }
+
     std::cout << "[GLSS SuperResolution] 初始化超分管线 (方法: "
               << static_cast<int>(method_) << ", 缩放比: " << scale_factor_
               << "x, 锐度: " << sharpness_ << ")" << std::endl;
     return true;
+}
+
+bool SuperResolutionEngine::UsingGpu() const {
+    return gpu_ != nullptr && gpu_->IsReady();
 }
 
 void SuperResolutionEngine::ComputeOutputSize(const FrameBuffer& in, float scale, uint32_t& out_w,
@@ -225,6 +252,21 @@ bool SuperResolutionEngine::Upscale(const FrameBuffer& input_frame, FrameBuffer&
     if (input_frame.data.empty() || input_frame.width == 0 || input_frame.height == 0 ||
         input_frame.data.size() < input_frame.ByteSize()) {
         return false;
+    }
+
+    // GPU path: one compute dispatch performs the selected upscale kernel
+    // (bilinear or edge-adaptive FSR) followed by RCAS. The mode mirrors the CPU
+    // dispatch table below so `--method` is honoured on the GPU too.
+    if (UsingGpu()) {
+        const uint32_t mode = (method_ == UpscaleMethod::Bilinear) ? 0u : 1u;
+        ComputeOutputSize(input_frame, scale_factor_, output_frame.width, output_frame.height);
+        output_frame.timestamp_ns = input_frame.timestamp_ns;
+        if (gpu_->Dispatch(input_frame, output_frame, sharpness_, mode)) {
+            return !output_frame.data.empty();
+        }
+        // Runtime failure (e.g. device lost): fall back to CPU for this frame.
+        std::cerr << "[GLSS SuperResolution] GPU 派发失败，本帧回退到 CPU 路径。" << std::endl;
+        output_frame = FrameBuffer{};
     }
 
     switch (method_) {

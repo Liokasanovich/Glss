@@ -62,6 +62,12 @@ public:
     VkQueue GetQueue() const { return compute_queue_; }
     uint32_t GetComputeQueueFamily() const { return compute_family_idx_; }
 
+    // Runtime entry-point lookup for downstream backends (e.g. VulkanCompute).
+    // These wrap the loader's vkGetDeviceProcAddr / vkGetInstanceProcAddr so no
+    // Vulkan function ever becomes a link-time dependency.
+    PFN_vkVoidFunction LoadDeviceProc(const char* name) const;
+    PFN_vkVoidFunction LoadInstanceProc(const char* name) const;
+
 private:
     bool initialized_ = false;
 
@@ -72,6 +78,8 @@ private:
     uint32_t compute_family_idx_ = 0;
 
     // Runtime-resolved teardown entry points + native loader handle.
+    PFN_vkGetInstanceProcAddr get_instance_proc_addr_ = nullptr;
+    PFN_vkGetDeviceProcAddr get_device_proc_addr_ = nullptr;
     PFN_vkDestroyDevice destroy_device_ = nullptr;
     PFN_vkDestroyInstance destroy_instance_ = nullptr;
     void* loader_handle_ = nullptr;

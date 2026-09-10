@@ -6,7 +6,8 @@
 //   2. Motion-compensated interpolation beats a naive non-motion blend.
 //   3. Super-resolution stays near-constant on constant input, correct dims.
 //   4. RCAS measurably increases local contrast on low-contrast detail.
-//   5. Headless pipeline 2x interpolation produces 2 upscaled frames per Step.
+//   5. Headless pipeline emits N upscaled frames per Step for an Nx multiplier
+//      (2x -> 2, 3x -> 3, 1x/disabled -> 1) with matching output_fps.
 //   6. Vulkan device enumeration smoke test.
 //   7. Window enumeration never crashes (even without a display) and the
 //      synthetic capture backend yields a 256x144 RGBA8 frame.
@@ -267,6 +268,116 @@ void TestRCAS() {
     CHECK(contrast_on > contrast_off);
 }
 
+// Exercises the real Vulkan compute pipeline. Skips cleanly (and passes) when
+// no Vulkan device is available, so CI without a GPU stays green.
+void TestGpuSuperResolution() {
+    std::cout << "[glss_tests] -- GPU super-resolution --" << std::endl;
+
+    auto ctx = std::make_shared<glss::VulkanContext>();
+    if (!ctx->Initialize(0)) {
+        std::cout << "[glss_tests]    SKIP: Vulkan context unavailable (no GPU in this environment)"
+                  << std::endl;
+        return;
+    }
+
+    // 32x24 input: vertical gradient plus a bright bar, to exercise both smooth
+    // interpolation and the edge-adaptive sharpening term.
+    glss::FrameBuffer in = MakeFrame(32, 24);
+    for (uint32_t y = 0; y < in.height; ++y) {
+        const uint8_t bg = static_cast<uint8_t>(20 + (y * 120) / (in.height - 1));
+        for (uint32_t x = 0; x < in.width; ++x) {
+            const uint8_t v = (x >= 12 && x < 18) ? 220 : bg;
+            SetPixel(in, x, y, v, static_cast<uint8_t>(v / 2), static_cast<uint8_t>(255 - v), 255);
+        }
+    }
+
+    glss::SuperResolutionEngine gpu(ctx);
+    CHECK(gpu.Initialize(glss::UpscaleMethod::Bilinear, 2.0f, 0.8f));
+
+    glss::FrameBuffer gpu_out;
+    CHECK(gpu.Upscale(in, gpu_out));
+    CHECK(gpu_out.width == 64);
+    CHECK(gpu_out.height == 48);
+    CHECK(gpu_out.data.size() == gpu_out.ByteSize());
+
+    bool any_nonzero = false;
+    for (uint8_t v : gpu_out.data) {
+        if (v != 0) {
+            any_nonzero = true;
+            break;
+        }
+    }
+    CHECK(any_nonzero);
+
+    if (!gpu.UsingGpu()) {
+        std::cout << "[glss_tests]    GPU backend not active; CPU fallback verified" << std::endl;
+        return;
+    }
+
+    std::cout << "[glss_tests]    GPU compute backend ACTIVE; validating against CPU reference"
+              << std::endl;
+
+    // The compute shader mirrors the CPU Bilinear + RCAS path, so a CPU-only
+    // engine with the same parameters is the reference.
+    glss::SuperResolutionEngine cpu(nullptr);
+    CHECK(cpu.Initialize(glss::UpscaleMethod::Bilinear, 2.0f, 0.8f));
+    glss::FrameBuffer cpu_out;
+    CHECK(cpu.Upscale(in, cpu_out));
+    CHECK(cpu_out.width == gpu_out.width);
+    CHECK(cpu_out.height == gpu_out.height);
+    CHECK(cpu_out.data.size() == gpu_out.data.size());
+
+    const double mae = MeanAbsError(gpu_out, cpu_out, 0, 0, static_cast<int>(gpu_out.width),
+                                    static_cast<int>(gpu_out.height));
+    std::cout << "[glss_tests]    GPU bilinear vs CPU bilinear mean abs error = " << mae << std::endl;
+    CHECK(mae < 8.0);
+
+    // D2: the GPU must honour the selected method. The FSR engine has to differ
+    // from the bilinear engine above (otherwise `--method` is ignored) and must
+    // still track its own CPU reference within tolerance.
+    glss::SuperResolutionEngine gpu_fsr(ctx);
+    CHECK(gpu_fsr.Initialize(glss::UpscaleMethod::FSR_1_0, 2.0f, 0.8f));
+    glss::FrameBuffer gpu_fsr_out;
+    CHECK(gpu_fsr.Upscale(in, gpu_fsr_out));
+    CHECK(gpu_fsr.UsingGpu());
+    CHECK(gpu_fsr_out.width == gpu_out.width);
+    CHECK(gpu_fsr_out.height == gpu_out.height);
+    CHECK(gpu_fsr_out.data.size() == gpu_out.data.size());
+    CHECK(gpu_fsr_out.data != gpu_out.data);
+    const double method_diff = MeanAbsError(gpu_out, gpu_fsr_out, 0, 0,
+                                            static_cast<int>(gpu_out.width),
+                                            static_cast<int>(gpu_out.height));
+    std::cout << "[glss_tests]    GPU bilinear vs GPU FSR mean abs diff = " << method_diff
+              << std::endl;
+    CHECK(method_diff > 1.0);
+
+    glss::SuperResolutionEngine cpu_fsr(nullptr);
+    CHECK(cpu_fsr.Initialize(glss::UpscaleMethod::FSR_1_0, 2.0f, 0.8f));
+    glss::FrameBuffer cpu_fsr_out;
+    CHECK(cpu_fsr.Upscale(in, cpu_fsr_out));
+    const double mae_fsr = MeanAbsError(gpu_fsr_out, cpu_fsr_out, 0, 0,
+                                        static_cast<int>(gpu_fsr_out.width),
+                                        static_cast<int>(gpu_fsr_out.height));
+    std::cout << "[glss_tests]    GPU FSR vs CPU FSR mean abs error = " << mae_fsr << std::endl;
+    CHECK(mae_fsr < 8.0);
+
+    // Repeat with a different size to prove buffers resize and the pipeline is
+    // safe to reuse across frames.
+    const glss::FrameBuffer in2 = MakeBarFrame(48, 40);
+    glss::FrameBuffer gpu_out2;
+    CHECK(gpu.Upscale(in2, gpu_out2));
+    CHECK(gpu_out2.width == 96);
+    CHECK(gpu_out2.height == 80);
+    CHECK(gpu_out2.data.size() == gpu_out2.ByteSize());
+
+    glss::FrameBuffer cpu_out2;
+    CHECK(cpu.Upscale(in2, cpu_out2));
+    const double mae2 = MeanAbsError(gpu_out2, cpu_out2, 0, 0, static_cast<int>(gpu_out2.width),
+                                     static_cast<int>(gpu_out2.height));
+    std::cout << "[glss_tests]    resize (48x40) GPU vs CPU mean abs error = " << mae2 << std::endl;
+    CHECK(mae2 < 8.0);
+}
+
 void TestHeadlessPipeline() {
     std::cout << "[glss_tests] -- headless pipeline --" << std::endl;
     glss::Config cfg;
@@ -306,6 +417,48 @@ void TestHeadlessPipeline() {
 
     pipeline->Stop();
     pipeline->Stop(); // idempotent
+
+    // 3x -> exactly three frames per Step and output_fps ~= 3 * input_fps.
+    glss::Config cfg3 = cfg;
+    cfg3.interpolation_multiplier = 3;
+    auto pipeline3 = glss::CreateGLSSPipeline();
+    CHECK(pipeline3 != nullptr);
+    CHECK(pipeline3->Initialize(cfg3));
+    pipeline3->Start();
+    for (int i = 0; i < 5; ++i) {
+        CHECK(pipeline3->Step());
+        CHECK(pipeline3->OutputFrameCount() == 3);
+    }
+    const glss::PerformanceMetrics m3 = pipeline3->GetMetrics();
+    std::cout << "[glss_tests]    3x input_frames=" << m3.input_frames
+              << " output_frames=" << m3.output_frames << " input_fps=" << m3.input_fps
+              << " output_fps=" << m3.output_fps << std::endl;
+    CHECK(m3.input_frames == 5);
+    CHECK(m3.output_frames == 15);
+    CHECK(m3.input_fps > 0.0);
+    CHECK(std::abs(m3.output_fps - 3.0 * m3.input_fps) <= 0.05 * 3.0 * m3.input_fps);
+    pipeline3->Stop();
+
+    // Interpolation enabled but multiplier <= 1 -> exactly one frame per Step.
+    glss::Config cfg1 = cfg;
+    cfg1.interpolation_multiplier = 1;
+    auto pipeline1 = glss::CreateGLSSPipeline();
+    CHECK(pipeline1 != nullptr);
+    CHECK(pipeline1->Initialize(cfg1));
+    pipeline1->Start();
+    for (int i = 0; i < 5; ++i) {
+        CHECK(pipeline1->Step());
+        CHECK(pipeline1->OutputFrameCount() == 1);
+    }
+    const glss::PerformanceMetrics m1 = pipeline1->GetMetrics();
+    std::cout << "[glss_tests]    1x input_frames=" << m1.input_frames
+              << " output_frames=" << m1.output_frames << " input_fps=" << m1.input_fps
+              << " output_fps=" << m1.output_fps << std::endl;
+    CHECK(m1.input_frames == 5);
+    CHECK(m1.output_frames == 5);
+    CHECK(m1.input_fps > 0.0);
+    CHECK(std::abs(m1.output_fps - m1.input_fps) <= 0.05 * m1.input_fps);
+    pipeline1->Stop();
 
     // Interpolation disabled -> exactly one frame per Step.
     glss::Config cfg_no_interp = cfg;
@@ -388,6 +541,7 @@ int main() {
     TestInterpolationAccuracy();
     TestSuperResolution();
     TestRCAS();
+    TestGpuSuperResolution();
     TestHeadlessPipeline();
     TestEnumerateDevices();
     TestWindowCapture();

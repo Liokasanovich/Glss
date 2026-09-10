@@ -1,12 +1,10 @@
 #include "glss/window_capture.h"
 
-#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
-#include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if defined(__linux__)
@@ -185,6 +183,7 @@ constexpr unsigned long kAllPlanes = ~0UL;
 constexpr XAtom kXA_WINDOW = 33;
 constexpr int kMSBFirst = 1;
 constexpr int kIsViewable = 2;
+constexpr int kInputOnly = 2; // X WindowAttributes.class
 
 // Xlib's default error handler terminates the process. Capture failures (e.g.
 // grabbing an unmapped window) must instead surface as a `false` return, so a
@@ -350,7 +349,8 @@ public:
 
         XWindowAttributes attr;
         if (api.XGetWindowAttributes(display_, window, &attr) == 0 || attr.width <= 0 ||
-            attr.height <= 0 || attr.map_state != kIsViewable) {
+            attr.height <= 0 || attr.map_state != kIsViewable || attr.depth <= 0 ||
+            attr.c_class == kInputOnly) {
             CloseDisplay();
             return false;
         }
@@ -370,7 +370,8 @@ public:
         // Re-query geometry so window resizes are picked up.
         XWindowAttributes attr;
         if (api.XGetWindowAttributes(display_, window_, &attr) == 0 || attr.width <= 0 ||
-            attr.height <= 0 || attr.map_state != kIsViewable) {
+            attr.height <= 0 || attr.map_state != kIsViewable || attr.depth <= 0 ||
+            attr.c_class == kInputOnly) {
             return false;
         }
         width_ = static_cast<uint32_t>(attr.width);
@@ -798,11 +799,10 @@ private:
                 const LONG center_y = (rect.top + rect.bottom) / 2;
                 for (UINT i = 0;; ++i) {
                     IDXGIOutput* candidate = nullptr;
-                    if (adapter->EnumOutputs(i, &candidate) == DXGI_ERROR_NOT_FOUND) {
+                    const HRESULT hr = adapter->EnumOutputs(i, &candidate);
+                    if (FAILED(hr) || candidate == nullptr) {
+                        SafeRelease(candidate);
                         break;
-                    }
-                    if (candidate == nullptr) {
-                        continue;
                     }
                     DXGI_OUTPUT_DESC desc;
                     if (SUCCEEDED(candidate->GetDesc(&desc))) {

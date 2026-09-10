@@ -1,0 +1,177 @@
+#version 450
+
+// GLSS super-resolution compute shader.
+//
+// Single-pass upscale followed by a Robust Contrast-Adaptive Sharpening (RCAS)
+// pass on RGB. `pc.mode` selects the upscale kernel:
+//   mode == 0 : edge-safe bilinear resample   (mirrors CPU ApplyBilinear)
+//   mode == 1 : edge-adaptive bilateral upscale (mirrors CPU ApplyFSR)
+// RCAS is then applied on top of whichever kernel ran, mirroring CPU ApplyRCAS.
+//
+// Buffers hold tightly packed RGBA8 pixels as little-endian uint32:
+//   byte0 = R, byte1 = G, byte2 = B, byte3 = A.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(std430, binding = 0) readonly buffer In {
+    uint in_data[];
+};
+
+layout(std430, binding = 1) writeonly buffer Out {
+    uint out_data[];
+};
+
+layout(push_constant) uniform P {
+    uint in_w;
+    uint in_h;
+    uint out_w;
+    uint out_h;
+    float sharpness;
+    uint mode;
+} pc;
+
+// CPU ApplyFSR constants: 1 / (2 * sigma^2) with sigma_spatial = 1,
+// sigma_range = 24.
+const float kSpatialNorm = 1.0 / (2.0 * 1.0 * 1.0);
+const float kRangeNorm = 1.0 / (2.0 * 24.0 * 24.0);
+
+vec4 UnpackRGBA(uint p) {
+    return vec4(float(p & 0xFFu), float((p >> 8) & 0xFFu), float((p >> 16) & 0xFFu),
+                float((p >> 24) & 0xFFu));
+}
+
+uint PackRGBA(uvec4 q) {
+    return q.x | (q.y << 8) | (q.z << 16) | (q.w << 24);
+}
+
+// Rec.601 integer luma on a quantized RGBA8 pixel, matching the CPU Luma helper.
+uint IntegerLuma(uvec4 q) {
+    return (299u * q.x + 587u * q.y + 114u * q.z) / 1000u;
+}
+
+// Edge-safe bilinear sample at fractional source coordinate (fx, fy). The
+// clamping / lerp order matches the CPU SampleBilinear helper exactly.
+vec4 SampleBilinear(float fx, float fy) {
+    const float max_x = float(pc.in_w - 1u);
+    const float max_y = float(pc.in_h - 1u);
+    fx = clamp(fx, 0.0, max_x);
+    fy = clamp(fy, 0.0, max_y);
+
+    const uint x0 = uint(fx);
+    const uint y0 = uint(fy);
+    const uint x1 = min(x0 + 1u, pc.in_w - 1u);
+    const uint y1 = min(y0 + 1u, pc.in_h - 1u);
+    const float dx = fx - float(x0);
+    const float dy = fy - float(y0);
+
+    const vec4 v00 = UnpackRGBA(in_data[y0 * pc.in_w + x0]);
+    const vec4 v10 = UnpackRGBA(in_data[y0 * pc.in_w + x1]);
+    const vec4 v01 = UnpackRGBA(in_data[y1 * pc.in_w + x0]);
+    const vec4 v11 = UnpackRGBA(in_data[y1 * pc.in_w + x1]);
+
+    const vec4 top = v00 * (1.0 - dx) + v10 * dx;
+    const vec4 bot = v01 * (1.0 - dx) + v11 * dx;
+    return top * (1.0 - dy) + bot * dy;
+}
+
+vec2 SourceCoord(uint ox, uint oy) {
+    return vec2((float(ox) + 0.5) * float(pc.in_w) / float(pc.out_w) - 0.5,
+                (float(oy) + 0.5) * float(pc.in_h) / float(pc.out_h) - 0.5);
+}
+
+uvec4 BilinearQuantized(uint ox, uint oy) {
+    const vec2 sc = SourceCoord(ox, oy);
+    return uvec4(clamp(SampleBilinear(sc.x, sc.y), 0.0, 255.0));
+}
+
+// Edge-adaptive (EASU-inspired) upscale. Mirrors CPU ApplyFSR exactly: a 4x4
+// tap window whose spatial Gaussian weight is modulated by a luma-range Gaussian
+// against the bilinear reference luma, so taps across an edge are down-weighted.
+uvec4 FsrQuantized(uint ox, uint oy) {
+    const vec2 sc = SourceCoord(ox, oy);
+    const float luma_ref = dot(SampleBilinear(sc.x, sc.y).rgb, vec3(0.299, 0.587, 0.114));
+
+    const int w = int(pc.in_w);
+    const int h = int(pc.in_h);
+    const int cx = clamp(int(floor(sc.x + 0.5)), 0, w - 1);
+    const int cy = clamp(int(floor(sc.y + 0.5)), 0, h - 1);
+
+    vec4 accum = vec4(0.0);
+    float weight_sum = 0.0;
+
+    for (int j = -1; j <= 2; ++j) {
+        const int sy = clamp(cy + j, 0, h - 1);
+        const float dy = float(sy) - sc.y;
+        for (int i = -1; i <= 2; ++i) {
+            const int sx = clamp(cx + i, 0, w - 1);
+            const float dx = float(sx) - sc.x;
+
+            const uvec4 pixel = uvec4(UnpackRGBA(in_data[uint(sy) * pc.in_w + uint(sx)]));
+            const float luma = float(IntegerLuma(pixel));
+            const float d = luma - luma_ref;
+
+            const float spatial = exp(-(dx * dx + dy * dy) * kSpatialNorm);
+            const float range = exp(-(d * d) * kRangeNorm);
+            const float weight = spatial * range;
+
+            weight_sum += weight;
+            accum += vec4(pixel) * weight;
+        }
+    }
+
+    if (weight_sum <= 0.0) {
+        weight_sum = 1.0;
+    }
+    return uvec4(clamp(accum / weight_sum, 0.0, 255.0));
+}
+
+// Quantized upscale output at an output coordinate for the selected mode.
+uvec4 UpscaleQuantized(uint ox, uint oy) {
+    if (pc.mode == 0u) {
+        return BilinearQuantized(ox, oy);
+    }
+    return FsrQuantized(ox, oy);
+}
+
+void main() {
+    const uint ox = gl_GlobalInvocationID.x;
+    const uint oy = gl_GlobalInvocationID.y;
+    if (ox >= pc.out_w || oy >= pc.out_h) {
+        return;
+    }
+
+    uvec4 center_q = UpscaleQuantized(ox, oy);
+
+    // RCAS only touches interior pixels, exactly like the CPU implementation.
+    // Neighbor lumas are taken from the same upscale kernel that produced the
+    // center pixel (bilinear or FSR), mirroring how CPU ApplyRCAS reads the
+    // already-upscaled frame.
+    if (pc.sharpness > 0.0 && ox >= 1u && oy >= 1u && ox + 1u < pc.out_w && oy + 1u < pc.out_h) {
+        uint min_luma = 255u;
+        uint max_luma = 0u;
+        uint neighbor_sum = 0u;
+        for (int jj = -1; jj <= 1; ++jj) {
+            for (int ii = -1; ii <= 1; ++ii) {
+                if (ii == 0 && jj == 0) {
+                    continue;
+                }
+                const uint l = IntegerLuma(UpscaleQuantized(ox + uint(ii), oy + uint(jj)));
+                min_luma = min(min_luma, l);
+                max_luma = max(max_luma, l);
+                neighbor_sum += l;
+            }
+        }
+
+        const uint center_luma = IntegerLuma(center_q);
+        const float blur = float(neighbor_sum) / 8.0;
+        const float detail = float(center_luma) - blur;
+        const float contrast = float(max_luma - min_luma);
+        const float adapt = clamp(1.0 - contrast / 255.0, 0.0, 1.0);
+        const float delta = pc.sharpness * adapt * detail;
+
+        const vec3 rgb = vec3(center_q.xyz) + vec3(delta);
+        center_q = uvec4(uvec3(clamp(rgb, 0.0, 255.0)), center_q.w);
+    }
+
+    out_data[oy * pc.out_w + ox] = PackRGBA(center_q);
+}

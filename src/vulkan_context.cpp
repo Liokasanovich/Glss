@@ -270,10 +270,13 @@ bool VulkanContext::Initialize(int preferred_device_index) {
         return false;
     }
 
-    // Honour the caller's preference when it is a valid index, otherwise fall
-    // back to the first discrete GPU (then device 0).
+    // Honour the caller's preference when it is a valid index, otherwise warn
+    // and fall back to the first discrete GPU (then device 0).
     int selected = preferred_device_index;
     if (selected < 0 || selected >= static_cast<int>(device_count)) {
+        std::cerr << "[GLSS Vulkan] 警告: 请求的设备索引 " << preferred_device_index
+                  << " 无效 (有效范围 0-" << (device_count - 1)
+                  << ")，将自动选择可用设备。" << std::endl;
         selected = -1;
         for (uint32_t i = 0; i < device_count; ++i) {
             VkPhysicalDeviceProperties props{};
@@ -359,6 +362,8 @@ bool VulkanContext::Initialize(int preferred_device_index) {
     device_ = device;
     compute_queue_ = queue;
     compute_family_idx_ = static_cast<uint32_t>(compute_family);
+    get_instance_proc_addr_ = api.get_instance_proc_addr;
+    get_device_proc_addr_ = api.get_device_proc_addr;
     destroy_device_ = api.destroy_device;
     destroy_instance_ = api.destroy_instance;
     loader_handle_ = loader;
@@ -367,6 +372,20 @@ bool VulkanContext::Initialize(int preferred_device_index) {
     std::cout << "[GLSS Vulkan] Selected device " << selected << ": " << props.deviceName << " (compute queue family "
               << compute_family_idx_ << ")" << std::endl;
     return true;
+}
+
+PFN_vkVoidFunction VulkanContext::LoadDeviceProc(const char* name) const {
+    if (get_device_proc_addr_ == nullptr || device_ == VK_NULL_HANDLE || name == nullptr) {
+        return nullptr;
+    }
+    return get_device_proc_addr_(device_, name);
+}
+
+PFN_vkVoidFunction VulkanContext::LoadInstanceProc(const char* name) const {
+    if (get_instance_proc_addr_ == nullptr || name == nullptr) {
+        return nullptr;
+    }
+    return get_instance_proc_addr_(instance_, name);
 }
 
 void VulkanContext::Shutdown() {
@@ -382,6 +401,8 @@ void VulkanContext::Shutdown() {
     device_ = VK_NULL_HANDLE;
     compute_queue_ = VK_NULL_HANDLE;
     compute_family_idx_ = 0;
+    get_instance_proc_addr_ = nullptr;
+    get_device_proc_addr_ = nullptr;
     destroy_device_ = nullptr;
     destroy_instance_ = nullptr;
 

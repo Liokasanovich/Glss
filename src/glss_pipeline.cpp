@@ -57,11 +57,13 @@ public:
         std::cout << "  - 捕获后端: "
                   << (config_.headless ? "合成测试画面 (headless)" : "平台窗口捕获") << std::endl;
         std::cout << "  - 缩放倍率: " << config_.scale_factor << "x" << std::endl;
+        const bool interp_enabled =
+            config_.enable_frame_interpolation && config_.interpolation_multiplier >= 2;
         std::cout << "  - 帧插值生成: "
-                  << (config_.enable_frame_interpolation
-                          ? (config_.interpolation_multiplier == 2 ? "已启用 (2x 模式)"
-                                                                    : "已启用")
-                          : "禁用")
+                  << (interp_enabled ? ("已启用 (" +
+                                        std::to_string(config_.interpolation_multiplier) +
+                                        "x 模式)")
+                                     : "禁用")
                   << std::endl;
         std::cout << "========================================================\n" << std::endl;
 
@@ -95,14 +97,21 @@ public:
         }
         const auto t1 = Clock::now();
 
-        // 2. Interpolate (2x emits [interpolated(0.5), current]).
+        // 2. Interpolate. For an Nx multiplier we emit N frames per input frame:
+        //    interpolated frames at t = k/N for k = 1..N-1, then the current
+        //    frame. N <= 1 (or interpolation disabled) emits just the current
+        //    frame, i.e. interpolation is effectively off.
         std::vector<FrameBuffer> emitted;
         const auto t2 = Clock::now();
-        if (config_.enable_frame_interpolation && config_.interpolation_multiplier == 2) {
+        const int multiplier = config_.interpolation_multiplier;
+        if (config_.enable_frame_interpolation && multiplier >= 2) {
             interpolator_->PushSourceFrame(raw_frame);
-            FrameBuffer interpolated;
-            if (interpolator_->GenerateInterpolatedFrame(0.5f, interpolated)) {
-                emitted.push_back(std::move(interpolated));
+            for (int k = 1; k < multiplier; ++k) {
+                const float t = static_cast<float>(k) / static_cast<float>(multiplier);
+                FrameBuffer interpolated;
+                if (interpolator_->GenerateInterpolatedFrame(t, interpolated)) {
+                    emitted.push_back(std::move(interpolated));
+                }
             }
         }
         emitted.push_back(raw_frame);
