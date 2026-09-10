@@ -1,83 +1,31 @@
----
+# GLSS (Gaming Lossless Scaling & Super-Resolution)
 
-# GLss: A Laplacian-Gaussian Pyramid-Based Non-AI Super-Resolution Algorithm
+基于现代 **Vulkan API** 构建的跨平台（**Windows & Linux**）窗口超分辨率放大与**帧插值（Frame Interpolation / 帧生成）**工具。
 
-> **Author**: [Liokasanovich`5878789]  
-> **Date**: November 7, 2025  
-> **Version**: v1.0  
-
----
-
-## 🌟 Acknowledgments
-
-We sincerely thank the **Magpie** project team for providing the foundational code framework and structural design. It was precisely due to your clear, modular initial implementation that this project was able to launch efficiently and iterate rapidly. We hereby offer our formal gratitude—your open-source spirit has laid a solid foundation for this research.
+> [!NOTE]
+> 原 Magpie 及自有着色器代码已完整迁移并安全归档至 [`legacy-magpie`](https://github.com/Liokasanovich/Glss/tree/legacy-magpie) 分支。  
+> 本 `main` 分支重构为面向未来的全平台 Vulkan 纯净高性能架构。
 
 ---
 
-## 🔍 Project Overview
+## 核心技术特性
 
-**GLss** is an **entirely AI-independent** emerging super-resolution algorithm. Rooted in the fundamental principles of signal processing and multi-scale image analysis, GLss **relies on no training data, neural networks, or machine learning models whatsoever**. Instead, it employs the classical **Laplacian-Gaussian Pyramid** to construct a novel, interpretable, and highly efficient framework for image resolution enhancement.
-
-The core insight of GLss is: **precisely separating structural and detail information across multi-scale spaces, then reconstructing them via controlled pyramid synthesis to achieve sub-pixel detail enhancement**.
-
----
-
-## 🧠 Core Principles
-
-### 1. Laplacian-Gaussian Pyramid Construction
-
-The GLss algorithm utilizes a multi-layer Laplacian-Gaussian pyramid structure, built as follows:
-
-1. **Gaussian Pyramid**:  
-   The input low-resolution image is repeatedly blurred with a Gaussian kernel and downsampled, generating a series of progressively smoothed scale layers:  
-   $ G_0, G_1, G_2, ..., G_n $
-
-2. **Laplacian Pyramid**:  
-   Each layer is computed as the difference between adjacent Gaussian layers:  
-   $ L_i = G_i - \text{upsample}(G_{i+1}) $, capturing **residual details** (edges, textures, high-frequency components) at each scale.
-
-3. **Detail Enhancement and Reconstruction**:  
-   During upsampling and reconstruction, each Laplacian coefficient is **non-linearly amplified** (via a non-learning, gradient-adaptive scheme), then recursively summed layer-by-layer to synthesize the final high-resolution output image.
-
-### 2. Advantages of Non-AI Design
-
-| Feature | GLss | AI-based SR (e.g., ESRGAN, SwinIR) |
-|--------|------|-----------------------------------|
-| Requires training data? | ❌ No | ✅ Yes |
-| Interpretability | ✅ Extremely High | ⚠️ Black-box |
-| Inference Speed | ✅ Very Fast (milliseconds) | ⚠️ Slower (GPU-dependent) |
-| Risk of Overfitting | ❌ None | ✅ Present |
-| Generalization | ✅ Works on any image | ⚠️ Limited by training distribution |
+* 🚀 **Vulkan 跨平台计算后端**：统一一套 GPU 计算着色器，通吃 Windows、Linux (X11 & Wayland)。
+* ⚡ **帧插值 (Frame Interpolation / Frame Gen)**：基于时域双帧历史与运动矢量估算，实现 `60 FPS -> 120 FPS` 的原生插帧放大。
+* 💎 **超分辨率缩放 (Super Resolution)**：边缘保真滤波与自适应锐化（支持 FSR 1.0、Anime4K 以及自定义着色器）。
+* 🛠️ **第一性与最简原则**：零繁重框架依赖，纯 C++17 构建，开箱即用。
 
 ---
 
-## 📈 Performance Characteristics
+## 3 步快速构建与运行
 
-- **Zero Training**: No pre-training required; plug-and-play functionality.
-- **Low Memory Footprint**: Requires only 2–3× the memory of the input image, ideal for embedded systems.
-- **Natural Texture Preservation**: Local, adaptive enhancement of Laplacian coefficients avoids the “over-smoothing” and “artifacts” common in AI models.
-- **Arbitrary Scaling Factors**: Pyramid depth can be adjusted to support 2×, 4×, 8×, and other multi-level upscaling.
+```bash
+# 1. 创建构建目录
+mkdir build && cd build
 
----
+# 2. 编译工程
+cmake .. && cmake --build . -j$(nproc)
 
-> The complete code implementation is open-sourced. See the project repository for details.
-
----
-
-## 📣 Disclaimer
-
-> **GLss is a completely original non-AI super-resolution algorithm**. This project does not use, rely upon, or incorporate any existing deep learning super-resolution models (including but not limited to ESRGAN, EDSR, SwinIR, Real-ESRGAN, etc.). All algorithmic logic has been independently derived and implemented based on classical multi-scale analysis theory.
-
----
-
-## 🤝 Contribution and Collaboration
-
-We welcome academics and industry professionals to validate, improve, and extend GLss. We encourage **non-commercial research** and **open-source collaboration** based on this algorithm.
-
-> ✅ Please acknowledge in any resulting work:  
-> This work is based on the GLss Super-Resolution Algorithm (https://github.com/your-repo/glss)
-
----
-
-**© 2025 GLss Project. All rights reserved.**  
-*Innovation arises from the reinterpretation of classical principles.*
+# 3. 运行体验
+./glss
+```
