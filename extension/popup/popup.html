@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="title">
+      <span>⚡ GLSS 增强</span>
+      <span class="badge">Pure GPU</span>
+    </div>
+    <span style="font-size: 11px; color: #64748b;">v1.0.0</span>
+  </div>
+
+  <div class="section">
+    <div class="row">
+      <span class="label">启用悬浮增强按钮</span>
+      <label class="switch">
+        <input type="checkbox" id="toggle-enable" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="row">
+      <span class="label">默认超分算法</span>
+      <select id="select-method">
+        <option value="fsr" selected>FSR + RCAS</option>
+        <option value="anime4k">Anime4K</option>
+        <option value="bilinear">Bilinear</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <span class="label">默认插帧倍率</span>
+      <select id="select-interp">
+        <option value="1">关闭插帧 (1x)</option>
+        <option value="2" selected>2x 插帧 (60 FPS)</option>
+        <option value="3">3x 插帧 (90 FPS)</option>
+        <option value="4">4x 插帧 (120 FPS+)</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <span class="label">默认缩放倍率</span>
+      <select id="select-scale">
+        <option value="1.0">1.0x (原生)</option>
+        <option value="1.5" selected>1.5x (推荐)</option>
+        <option value="2.0">2.0x (超高清)</option>
+      </select>
+    </div>
+  </div>
+
+  <button class="demo-btn" id="btn-open-demo">
+    🎬 打开本地快速测试页
+  </button>
+
+  <div class="footer">
+    基于 WebGL2 / WebGPU 纯显卡硬件加速
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

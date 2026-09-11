@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>GLSS 视频超分辨率与帧插值播放器</title>
+  <link rel="stylesheet" href="pip.css">
+</head>
+<body>
+  <div id="glss-container">
+    <canvas id="glss-canvas"></canvas>
+
+    <!-- Real-time HUD stats -->
+    <div id="glss-hud">
+      <div class="hud-title">⚡ GLSS GPU 渲染管线</div>
+      <div>后端: <span id="hud-backend" class="hud-val">WebGL2 (Pure GPU)</span></div>
+      <div>源分辨率: <span id="hud-src-res" class="hud-val">1920x1080</span></div>
+      <div>输出分辨率: <span id="hud-out-res" class="hud-val">2880x1620 (1.5x)</span></div>
+      <div>FPS: <span id="hud-src-fps" class="hud-val">30</span> ➔ <span id="hud-render-fps" class="hud-fps">60 FPS</span></div>
+      <div>GPU 耗时: <span id="hud-gpu-time" class="hud-val">0.8 ms</span></div>
+    </div>
+
+    <!-- Bottom Controls Overlay -->
+    <div id="glss-controls">
+      <div class="progress-bar-container" id="progress-container">
+        <div class="progress-bar-fill" id="progress-fill"></div>
+      </div>
+
+      <div class="controls-row">
+        <div class="left-group">
+          <button class="icon-btn" id="btn-play">⏸ 暂停</button>
+          <div class="time-display">
+            <span id="time-current">00:00</span> / <span id="time-duration">00:00</span>
+          </div>
+
+          <!-- Interpolation multiplier -->
+          <div class="btn-group" id="group-interp" title="帧插值倍率">
+            <button data-multiplier="1">1x</button>
+            <button data-multiplier="2" class="active">2x (60FPS)</button>
+            <button data-multiplier="3">3x (90FPS)</button>
+            <button data-multiplier="4">4x (120FPS+)</button>
+          </div>
+        </div>
+
+        <div class="right-group">
+          <!-- Upscale Method -->
+          <div class="btn-group" id="group-method" title="超分辨率算法">
+            <button data-method="fsr" class="active">FSR</button>
+            <button data-method="anime4k">Anime4K</button>
+            <button data-method="bilinear">Bilinear</button>
+          </div>
+
+          <!-- Scale Factor -->
+          <div class="btn-group" id="group-scale" title="缩放倍率">
+            <button data-scale="1.0">1.0x</button>
+            <button data-scale="1.5" class="active">1.5x</button>
+            <button data-scale="2.0">2.0x</button>
+          </div>
+
+          <!-- Sharpness Slider -->
+          <div class="slider-group" title="RCAS 锐化强度">
+            <span>锐化:</span>
+            <input type="range" id="slider-sharpness" min="0" max="1" step="0.05" value="0.8">
+            <span id="val-sharpness">0.8</span>
+          </div>
+
+          <button class="icon-btn" id="btn-hud" title="切换 HUD 性能统计 (O)">📊 HUD</button>
+          <button class="icon-btn" id="btn-fullscreen" title="全屏">⛶</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="pip.js"></script>
+</body>
+</html>
