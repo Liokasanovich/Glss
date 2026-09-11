@@ -10,7 +10,10 @@
   // Dynamically import pure GPU engine from extension
   let GlssGpuEngine;
   try {
-    const mod = await import(chrome.runtime.getURL("renderer/glss-gpu.js"));
+    const gpuUrl = (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL)
+      ? chrome.runtime.getURL("renderer/glss-gpu.js")
+      : "../renderer/glss-gpu.js";
+    const mod = await import(gpuUrl);
     GlssGpuEngine = mod.GlssGpuEngine;
   } catch (err) {
     console.error("[GLSS] 导入 GPU 渲染模块失败:", err);
@@ -28,6 +31,10 @@
     // YouTube
     const ytWrap = video.closest(".html5-video-container") || video.closest("#movie_player");
     if (ytWrap) return ytWrap;
+
+    // Demo wrapper
+    const demoWrap = video.closest(".video-wrapper");
+    if (demoWrap) return demoWrap;
 
     // Tencent / iQiyi / Youku / Generic
     const genericWrap = video.closest(".txp_video_container") || video.closest(".iqp-player") || video.parentElement;
@@ -365,12 +372,16 @@
 
           pipWindow.__glssSourceVideo = this.video;
 
+          const getUrl = (path) => (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL)
+            ? chrome.runtime.getURL(path)
+            : `../${path}`;
+
           const styleLink = pipWindow.document.createElement("link");
           styleLink.rel = "stylesheet";
-          styleLink.href = chrome.runtime.getURL("renderer/pip.css");
+          styleLink.href = getUrl("renderer/pip.css");
           pipWindow.document.head.appendChild(styleLink);
 
-          const resp = await fetch(chrome.runtime.getURL("renderer/pip.html"));
+          const resp = await fetch(getUrl("renderer/pip.html"));
           const html = await resp.text();
           const parser = new DOMParser();
           const doc = parser.parseFromString(html, "text/html");
@@ -380,7 +391,7 @@
 
           const script = pipWindow.document.createElement("script");
           script.type = "module";
-          script.src = chrome.runtime.getURL("renderer/pip.js");
+          script.src = getUrl("renderer/pip.js");
           pipWindow.document.body.appendChild(script);
 
           console.log("[GLSS] 已成功唤出 Document PiP 小窗。");

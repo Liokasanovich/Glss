@@ -64,6 +64,9 @@ export class GlssGpuEngine {
     this.gl = gl;
     this.stats.backend = "WebGL2 (Pure GPU)";
 
+    // Flip Y to match HTML video top-left coordinate system
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
     // Compile GLSL Shaders
     this.initQuad();
     this.initShaders();
@@ -436,11 +439,13 @@ export class GlssGpuEngine {
     this.texPrev = this.texCurr;
     this.texCurr = tmp;
 
-    // Hardware texture upload
+    // Hardware texture upload (with Y-flip for video orientation)
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.bindTexture(gl.TEXTURE_2D, this.texCurr);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
 
     if (!this.hasPrevFrame) {
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
       gl.bindTexture(gl.TEXTURE_2D, this.texPrev);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
       this.hasPrevFrame = true;

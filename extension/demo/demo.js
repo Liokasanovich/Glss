@@ -8,11 +8,6 @@ canvas.width = 960;
 canvas.height = 540;
 const ctx = canvas.getContext("2d");
 
-// Stream canvas at 24 FPS (film cadence)
-const stream = canvas.captureStream(24);
-video.srcObject = stream;
-video.play().catch(() => {});
-
 // Animation state
 let frameIdx = 0;
 const balls = [
@@ -78,7 +73,6 @@ function drawDemoFrame() {
     ctx.strokeStyle = "#ffffff";
     ctx.stroke();
 
-    // Inner details for sharpness test
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 12px sans-serif";
     ctx.textAlign = "center";
@@ -87,5 +81,12 @@ function drawDemoFrame() {
   }
 }
 
-// 24 FPS timer
+// Initial draw before stream
+drawDemoFrame();
+
+// Stream canvas at 24 FPS (film cadence)
+const stream = canvas.captureStream(24);
+video.srcObject = stream;
+video.play().catch(() => {});
+
 setInterval(drawDemoFrame, 1000 / 24);

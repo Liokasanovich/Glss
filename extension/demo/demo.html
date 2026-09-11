@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>GLSS 视频超分辨率与帧插值 - 本地快速演示</title>
+  <link rel="stylesheet" href="../content/content.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -98,16 +99,17 @@
       <p class="subtitle">实时视频超分辨率 (FSR+RCAS/Anime4K) 与运动补偿帧插值 (Nx) 测试沙盒</p>
       <div class="badge-bar">
         <span class="pill">纯显卡 WebGL2 / WebGPU</span>
-        <span class="pill">零 CPU 拷贝</span>
-        <span class="pill">Document PiP 小窗</span>
-        <span class="pill">支持 Bilibili / YouTube / 本地视频</span>
+        <span class="pill">Edge VSR 原生就地增强</span>
+        <span class="pill">左右分屏对比</span>
+        <span class="pill">Document PiP 独立小窗</span>
       </div>
     </header>
 
     <div class="instructions">
       👉 <strong>使用指南：</strong>
-      把鼠标悬停在下方视频画面上，右上角会浮现 <strong>⚡ GLSS 🚀 一键超分插帧</strong> 按钮。
-      点击后即可一键唤出独立小窗播放器，实时体验 <strong>24fps -> 60fps/120fps 流畅插帧</strong> 与 <strong>FSR 锐化超分放大</strong>！
+      看视频画面右上角的 <strong>[⚡ 增强视频 (开/关)]</strong> 胶囊徽章：<br>
+      1. 点击胶囊上的<strong>滑动开关</strong>，画面立即在原位开启 <strong>纯 GPU 超分辨率 + 60/120 FPS 插帧</strong>。<br>
+      2. 点击胶囊文字打开菜单，可开启 <strong>分屏对比 (左右对比滑块)</strong>、调节锐化度或唤出 <strong>独立画中画小窗</strong>！
     </div>
 
     <div class="video-card">
@@ -118,5 +120,6 @@
   </div>
 
   <script src="demo.js"></script>
+  <script type="module" src="../content/content.js"></script>
 </body>
 </html>
