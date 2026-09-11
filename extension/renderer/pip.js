@@ -22,6 +22,7 @@ const btnHud = document.getElementById("btn-hud");
 const btnFullscreen = document.getElementById("btn-fullscreen");
 
 const groupInterp = document.getElementById("group-interp");
+const groupInterpMode = document.getElementById("group-interp-mode");
 const groupMethod = document.getElementById("group-method");
 const groupScale = document.getElementById("group-scale");
 const sliderSharpness = document.getElementById("slider-sharpness");
@@ -171,6 +172,17 @@ groupInterp.querySelectorAll("button").forEach(btn => {
     engine.interpMultiplier = parseInt(btn.dataset.multiplier, 10);
   });
 });
+
+// Interp Mode Buttons
+if (groupInterpMode) {
+  groupInterpMode.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      groupInterpMode.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      engine.interpMode = parseInt(btn.dataset.mode, 10);
+    });
+  });
+}
 
 // Method Buttons
 groupMethod.querySelectorAll("button").forEach(btn => {

@@ -25,9 +25,11 @@
     <div class="row">
       <span class="label">默认超分算法</span>
       <select id="select-method">
-        <option value="fsr" selected>FSR + RCAS</option>
-        <option value="anime4k">Anime4K</option>
-        <option value="bilinear">Bilinear</option>
+        <option value="fsr" selected>FSR 1.0 (EASU + RCAS)</option>
+        <option value="anime4k">Anime4K v4.0 (二次元)</option>
+        <option value="nis">NIS (NVIDIA Image Scaling)</option>
+        <option value="bicubic">Bicubic (16-Tap 双三次)</option>
+        <option value="bilinear">Bilinear (双线性插值)</option>
       </select>
     </div>
 
@@ -38,6 +40,17 @@
         <option value="2" selected>2x 插帧 (60 FPS)</option>
         <option value="3">3x 插帧 (90 FPS)</option>
         <option value="4">4x 插帧 (120 FPS+)</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <span class="label">插帧算法引擎</span>
+      <select id="select-interp-mode">
+        <option value="0" selected>金字塔光流 (抗重影/推荐)</option>
+        <option value="1">宏块 SAD 匹配 (低开销)</option>
+        <option value="2">24p 电影去抖动平滑</option>
+        <option value="3">时域加权混合</option>
+        <option value="4">🔍 运动矢量可视化</option>
       </select>
     </div>
 

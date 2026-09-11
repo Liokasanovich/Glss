@@ -35,18 +35,29 @@
           <!-- Interpolation multiplier -->
           <div class="btn-group" id="group-interp" title="帧插值倍率">
             <button data-multiplier="1">1x</button>
-            <button data-multiplier="2" class="active">2x (60FPS)</button>
-            <button data-multiplier="3">3x (90FPS)</button>
-            <button data-multiplier="4">4x (120FPS+)</button>
+            <button data-multiplier="2" class="active">2x</button>
+            <button data-multiplier="3">3x</button>
+            <button data-multiplier="4">4x</button>
+          </div>
+
+          <!-- Interpolation mode -->
+          <div class="btn-group" id="group-interp-mode" title="插帧算法模式">
+            <button data-mode="0" class="active" title="分层金字塔光流 (抗重影/推荐)">光流</button>
+            <button data-mode="1" title="宏块SAD匹配 (低开销)">SAD</button>
+            <button data-mode="2" title="24p电影去抖动">去抖动</button>
+            <button data-mode="3" title="时域加权混合">混合</button>
+            <button data-mode="4" title="运动矢量测试">矢量</button>
           </div>
         </div>
 
         <div class="right-group">
           <!-- Upscale Method -->
           <div class="btn-group" id="group-method" title="超分辨率算法">
-            <button data-method="fsr" class="active">FSR</button>
-            <button data-method="anime4k">Anime4K</button>
-            <button data-method="bilinear">Bilinear</button>
+            <button data-method="fsr" class="active" title="AMD FidelityFX Super Resolution">FSR</button>
+            <button data-method="anime4k" title="Anime4K v4.0">Anime4K</button>
+            <button data-method="nis" title="NVIDIA Image Scaling">NIS</button>
+            <button data-method="bicubic" title="16-Tap 双三次滤波">Bicubic</button>
+            <button data-method="bilinear" title="原生双线性">Bilinear</button>
           </div>
 
           <!-- Scale Factor -->

@@ -50,6 +50,7 @@
       this.splitPos = 0.5;
 
       this.interpMultiplier = 2; // 2x default (60 FPS)
+      this.interpMode = 0; // 0: 金字塔光流
       this.upscaleMethod = "fsr";
       this.scaleFactor = 1.5;
       this.sharpness = 0.8;
@@ -150,9 +151,11 @@
         <div class="glss-flyout-row">
           <label>超分辨率算法</label>
           <select class="glss-flyout-select" id="glss-opt-method">
-            <option value="fsr" selected>FSR + RCAS</option>
-            <option value="anime4k">Anime4K</option>
-            <option value="bilinear">Bilinear</option>
+            <option value="fsr" selected>FSR 1.0 (EASU + RCAS)</option>
+            <option value="anime4k">Anime4K v4.0 (二次元)</option>
+            <option value="nis">NIS (NVIDIA Image Scaling)</option>
+            <option value="bicubic">Bicubic (16-Tap 双三次)</option>
+            <option value="bilinear">Bilinear (双线性原生)</option>
           </select>
         </div>
 
@@ -169,9 +172,11 @@
         <div class="glss-flyout-row">
           <label>插帧算法</label>
           <select class="glss-flyout-select" id="glss-opt-interp-mode">
-            <option value="0" selected>光流运动补偿 (推荐)</option>
-            <option value="1">时域平滑过渡</option>
-            <option value="2">🔍 光流可视化测试</option>
+            <option value="0" selected>金字塔光流 (抗重影/推荐)</option>
+            <option value="1">宏块 SAD 匹配 (低开销)</option>
+            <option value="2">24p 电影去抖动</option>
+            <option value="3">时域加权混合</option>
+            <option value="4">🔍 运动向量可视化</option>
           </select>
         </div>
 
@@ -277,6 +282,7 @@
         this.engine.sharpness = this.sharpness;
         this.engine.upscaleMethod = this.upscaleMethod;
         this.engine.interpMultiplier = this.interpMultiplier;
+        this.engine.interpMode = this.interpMode;
         this.engine.splitScreen = this.isSplitScreen;
         this.engine.splitPosition = this.splitPos;
       }
