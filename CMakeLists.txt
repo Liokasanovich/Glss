@@ -53,3 +53,12 @@ if(GLSS_BUILD_TESTS)
     target_compile_options(glss_tests PRIVATE ${GLSS_WARNINGS})
     add_test(NAME glss_core_tests COMMAND glss_tests)
 endif()
+
+# 工业级安装与打包规则 (GNU 标准路径)
+include(GNUInstallDirs)
+install(TARGETS glss glss_core
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+install(DIRECTORY include/glss DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
