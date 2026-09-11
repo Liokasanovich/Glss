@@ -167,6 +167,15 @@
         </div>
 
         <div class="glss-flyout-row">
+          <label>插帧算法</label>
+          <select class="glss-flyout-select" id="glss-opt-interp-mode">
+            <option value="0" selected>光流运动补偿 (推荐)</option>
+            <option value="1">时域平滑过渡</option>
+            <option value="2">🔍 光流可视化测试</option>
+          </select>
+        </div>
+
+        <div class="glss-flyout-row">
           <label>放大倍率</label>
           <select class="glss-flyout-select" id="glss-opt-scale">
             <option value="1.0">1.0x (原尺寸)</option>
@@ -195,6 +204,7 @@
       // Event bindings
       const optMethod = this.flyoutEl.querySelector("#glss-opt-method");
       const optInterp = this.flyoutEl.querySelector("#glss-opt-interp");
+      const optInterpMode = this.flyoutEl.querySelector("#glss-opt-interp-mode");
       const optScale = this.flyoutEl.querySelector("#glss-opt-scale");
       const optSplit = this.flyoutEl.querySelector("#glss-opt-split");
       const btnPip = this.flyoutEl.querySelector("#glss-btn-pip");
@@ -207,6 +217,10 @@
       optInterp.addEventListener("change", () => {
         this.interpMultiplier = parseInt(optInterp.value, 10);
         if (this.engine) this.engine.interpMultiplier = this.interpMultiplier;
+      });
+
+      optInterpMode.addEventListener("change", () => {
+        if (this.engine) this.engine.interpMode = parseInt(optInterpMode.value, 10);
       });
 
       optScale.addEventListener("change", () => {
@@ -289,12 +303,14 @@
       const renderLoop = () => {
         if (!this.isEnabled) return;
 
-        if (this.engine && this.engine.hasPrevFrame) {
+        if (this.engine && this.engine.hasPrevFrame && !this.video.paused) {
           const now = performance.now();
           const elapsed = now - this.engine.lastFrameArrivalTime;
-          const interval = this.engine.frameDuration || (1000 / 30);
-          const phase = Math.min(1.0, elapsed / interval);
+          const interval = Math.max(16.0, this.engine.frameDuration || 33.3);
+          const phase = Math.min(1.0, Math.max(0.0, elapsed / interval));
           this.engine.renderFrame(this.interpMultiplier >= 2 ? phase : 1.0);
+        } else if (this.engine && this.engine.hasPrevFrame && this.video.paused) {
+          this.engine.renderFrame(1.0);
         }
 
         if (this.flyoutEl && this.flyoutEl.style.display !== "none") {

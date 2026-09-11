@@ -109,12 +109,11 @@ export function attachSourceVideo(video) {
     if (!sourceVideo) return;
 
     const mult = engine.interpMultiplier;
-    if (mult >= 2) {
-      // Calculate normalized phase between source frames
+    if (mult >= 2 && !sourceVideo.paused) {
       const now = performance.now();
       const elapsedSinceSrc = now - engine.lastFrameArrivalTime;
-      const expectedInterval = engine.frameDuration || (1000 / 30);
-      phase = Math.min(1.0, elapsedSinceSrc / expectedInterval);
+      const expectedInterval = Math.max(16.0, engine.frameDuration || (1000 / 30));
+      phase = Math.min(1.0, Math.max(0.0, elapsedSinceSrc / expectedInterval));
       engine.renderFrame(phase);
     } else {
       engine.renderFrame(1.0);
