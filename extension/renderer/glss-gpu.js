@@ -1,13 +1,11 @@
 // GLSS Pure GPU Rendering Engine (WebGPU & WebGL2)
 // Executes 100% on GPU: Zero CPU pixel loops.
-// Pipeline: Video Frame -> GPU Texture -> GPU Frame Interpolation Shader -> GPU Super Resolution (FSR/RCAS) Shader -> Canvas
+// Pipeline: Video Frame -> GPU Texture -> GPU Frame Interpolation Shader -> GPU Super Resolution (FSR/RCAS) Shader -> Composite -> Canvas
 
 export class GlssGpuEngine {
   constructor(canvas) {
     this.canvas = canvas;
     this.gl = null;
-    this.device = null;
-    this.isWebGpu = false;
 
     // Config
     this.scaleFactor = 1.5;
@@ -15,6 +13,8 @@ export class GlssGpuEngine {
     this.upscaleMethod = "fsr"; // 'fsr', 'anime4k', 'bilinear'
     this.interpMultiplier = 2;   // 1 (off), 2, 3, 4
     this.interpMode = 0;         // 0: motion compensated, 1: blend
+    this.splitScreen = false;    // Edge-style split screen comparison
+    this.splitPosition = 0.5;
 
     // State
     this.video = null;
@@ -151,7 +151,6 @@ export class GlssGpuEngine {
         vec2 bestMv = vec2(0.0);
         float centerLuma = luma(texture(u_curr, uv).rgb);
 
-        // Search local neighborhood in previous frame
         for (int dy = -4; dy <= 4; dy += 2) {
           for (int dx = -4; dx <= 4; dx += 2) {
             vec2 offset = vec2(float(dx), float(dy)) * px;
@@ -169,7 +168,6 @@ export class GlssGpuEngine {
       void main() {
         float t = clamp(u_t, 0.0, 1.0);
         if (u_mode == 1 || t <= 0.01) {
-          // Pure temporal blend or exact keyframe
           vec4 p = texture(u_prev, v_uv);
           vec4 c = texture(u_curr, v_uv);
           fragColor = mix(p, c, t);
@@ -209,7 +207,6 @@ export class GlssGpuEngine {
         vec2 f = fract(pos);
         vec2 base = (floor(pos) + 0.5) * px;
 
-        // 4-tap edge-adaptive bilateral sampling
         vec4 c00 = texture(u_source, base);
         vec4 c10 = texture(u_source, base + vec2(px.x, 0.0));
         vec4 c01 = texture(u_source, base + vec2(0.0, px.y));
@@ -220,12 +217,10 @@ export class GlssGpuEngine {
         float l01 = luma(c01.rgb);
         float l11 = luma(c11.rgb);
 
-        // Edge gradient
         float gx = abs(l00 + l01 - l10 - l11);
         float gy = abs(l00 + l10 - l01 - l11);
         float lengthG = sqrt(gx * gx + gy * gy) + 1e-5;
 
-        // Weights
         vec2 w = f;
         if (gx > gy) {
           w.x = mix(f.x, smoothstep(0.0, 1.0, f.x), clamp(lengthG * 2.0, 0.0, 1.0));
@@ -275,7 +270,6 @@ export class GlssGpuEngine {
         float minL = min(min(bL, dL), min(fL, min(hL, eL)));
         float maxL = max(max(bL, dL), max(fL, max(hL, eL)));
 
-        // Contrast-adaptive kernel weight
         float contrast = maxL - minL;
         float w = clamp(min(eL - minL, maxL - eL) / max(contrast, 1e-4), 0.0, 1.0) * u_sharpness * 0.25;
 
@@ -306,7 +300,6 @@ export class GlssGpuEngine {
         vec4 w = texture(u_source, v_uv + vec2(-px.x, 0.0));
         vec4 e = texture(u_source, v_uv + vec2(px.x, 0.0));
 
-        // Sobel gradient
         float lC = luma(c.rgb);
         float lN = luma(n.rgb);
         float lS = luma(s.rgb);
@@ -316,7 +309,6 @@ export class GlssGpuEngine {
         vec2 grad = vec2(lE - lW, lS - lN);
         float gradLen = length(grad);
 
-        // Thinning and line accentuation
         vec2 pushUv = v_uv - normalize(grad + 1e-5) * px * gradLen * (u_strength * 0.5);
         vec4 refined = texture(u_source, pushUv);
 
@@ -335,11 +327,42 @@ export class GlssGpuEngine {
       }
     `;
 
+    // 6. Edge-style Split Screen Composite Pass
+    const fsComposite = `#version 300 es
+      precision highp float;
+      in vec2 v_uv;
+      out vec4 fragColor;
+
+      uniform sampler2D u_orig;
+      uniform sampler2D u_enh;
+      uniform int u_split;
+      uniform float u_splitPos;
+
+      void main() {
+        if (u_split == 1) {
+          float dist = abs(v_uv.x - u_splitPos);
+          if (dist < 0.002) {
+            // Neon cyan divider bar
+            fragColor = vec4(0.22, 0.74, 0.97, 1.0);
+            return;
+          }
+          if (v_uv.x < u_splitPos) {
+            fragColor = texture(u_orig, v_uv);
+          } else {
+            fragColor = texture(u_enh, v_uv);
+          }
+        } else {
+          fragColor = texture(u_enh, v_uv);
+        }
+      }
+    `;
+
     this.progInterp = this.createProgram(vsScreenQuad, fsInterp);
     this.progFsr = this.createProgram(vsScreenQuad, fsUpscaleFsr);
     this.progRcas = this.createProgram(vsScreenQuad, fsRcas);
     this.progAnime4k = this.createProgram(vsScreenQuad, fsAnime4k);
     this.progBilinear = this.createProgram(vsScreenQuad, fsBilinear);
+    this.progComposite = this.createProgram(vsScreenQuad, fsComposite);
   }
 
   initTextures() {
@@ -348,9 +371,11 @@ export class GlssGpuEngine {
     this.texCurr = this.createTexture();
     this.texInterp = this.createTexture();
     this.texUpscale = this.createTexture();
+    this.texFinalEnh = this.createTexture();
 
     this.fboInterp = gl.createFramebuffer();
     this.fboUpscale = gl.createFramebuffer();
+    this.fboFinalEnh = gl.createFramebuffer();
   }
 
   createTexture() {
@@ -378,7 +403,6 @@ export class GlssGpuEngine {
 
     const gl = this.gl;
 
-    // Allocate texture storage for intermediate buffers
     gl.bindTexture(gl.TEXTURE_2D, this.texInterp);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, srcW, srcH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboInterp);
@@ -389,13 +413,17 @@ export class GlssGpuEngine {
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboUpscale);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.texUpscale, 0);
 
+    gl.bindTexture(gl.TEXTURE_2D, this.texFinalEnh);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.outWidth, this.outHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboFinalEnh);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.texFinalEnh, 0);
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     this.stats.srcResolution = `${srcW}x${srcH}`;
     this.stats.outResolution = `${this.outWidth}x${this.outHeight}`;
   }
 
-  // Pure GPU: Upload current video frame straight into GPU Texture
   pushVideoFrame(video) {
     if (!video || video.videoWidth === 0 || video.videoHeight === 0) return;
     this.updateDimensions(video.videoWidth, video.videoHeight);
@@ -403,17 +431,16 @@ export class GlssGpuEngine {
     const gl = this.gl;
     const now = performance.now();
 
-    // Swap prev and curr textures (zero copy)
+    // Swap textures
     const tmp = this.texPrev;
     this.texPrev = this.texCurr;
     this.texCurr = tmp;
 
-    // Hardware DMA upload into curr texture
+    // Hardware texture upload
     gl.bindTexture(gl.TEXTURE_2D, this.texCurr);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
 
     if (!this.hasPrevFrame) {
-      // First frame: populate both
       gl.bindTexture(gl.TEXTURE_2D, this.texPrev);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
       this.hasPrevFrame = true;
@@ -429,7 +456,6 @@ export class GlssGpuEngine {
     this.srcFrameCount++;
   }
 
-  // Dispatches complete GPU enhancement pipeline
   renderFrame(t = 1.0) {
     if (!this.gl || this.srcWidth === 0 || this.srcHeight === 0) return;
 
@@ -439,7 +465,7 @@ export class GlssGpuEngine {
     gl.bindVertexArray(this.quadVao);
 
     // ==========================================
-    // PASS 1: Pure GPU Frame Interpolation
+    // PASS 1: GPU Frame Interpolation
     // ==========================================
     let activeSourceTex = this.texCurr;
 
@@ -468,10 +494,7 @@ export class GlssGpuEngine {
     // ==========================================
     // PASS 2: Super Resolution Upscale Pass
     // ==========================================
-    const needsRcas = (this.sharpness > 0.01);
-    const targetFbo = needsRcas ? this.fboUpscale : null;
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, targetFbo);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboUpscale);
     gl.viewport(0, 0, this.outWidth, this.outHeight);
 
     let upscaleProg = this.progFsr;
@@ -500,19 +523,38 @@ export class GlssGpuEngine {
     // ==========================================
     // PASS 3: Robust Contrast-Adaptive Sharpening (RCAS)
     // ==========================================
-    if (needsRcas) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, this.outWidth, this.outHeight);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboFinalEnh);
+    gl.viewport(0, 0, this.outWidth, this.outHeight);
 
-      gl.useProgram(this.progRcas);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this.texUpscale);
-      gl.uniform1i(gl.getUniformLocation(this.progRcas, "u_tex"), 0);
-      gl.uniform2f(gl.getUniformLocation(this.progRcas, "u_res"), this.outWidth, this.outHeight);
-      gl.uniform1f(gl.getUniformLocation(this.progRcas, "u_sharpness"), this.sharpness);
+    gl.useProgram(this.progRcas);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.texUpscale);
+    gl.uniform1i(gl.getUniformLocation(this.progRcas, "u_tex"), 0);
+    gl.uniform2f(gl.getUniformLocation(this.progRcas, "u_res"), this.outWidth, this.outHeight);
+    gl.uniform1f(gl.getUniformLocation(this.progRcas, "u_sharpness"), this.sharpness);
 
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    }
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // ==========================================
+    // PASS 4: Edge-style Composite / Split Screen Pass -> Canvas
+    // ==========================================
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.outWidth, this.outHeight);
+
+    gl.useProgram(this.progComposite);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.texCurr);
+    gl.uniform1i(gl.getUniformLocation(this.progComposite, "u_orig"), 0);
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.texFinalEnh);
+    gl.uniform1i(gl.getUniformLocation(this.progComposite, "u_enh"), 1);
+
+    gl.uniform1i(gl.getUniformLocation(this.progComposite, "u_split"), this.splitScreen ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(this.progComposite, "u_splitPos"), this.splitPosition);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.bindVertexArray(null);
 
@@ -520,7 +562,6 @@ export class GlssGpuEngine {
     this.stats.gpuTimeMs = Math.round((t1 - t0) * 100) / 100;
     this.renderFrameCount++;
 
-    // Calculate real-time FPS
     if (t1 - this.lastFpsCalcTime >= 1000) {
       const elapsed = (t1 - this.lastFpsCalcTime) / 1000;
       this.stats.srcFps = Math.round(this.srcFrameCount / elapsed);
@@ -540,12 +581,15 @@ export class GlssGpuEngine {
     gl.deleteTexture(this.texCurr);
     gl.deleteTexture(this.texInterp);
     gl.deleteTexture(this.texUpscale);
+    gl.deleteTexture(this.texFinalEnh);
     gl.deleteFramebuffer(this.fboInterp);
     gl.deleteFramebuffer(this.fboUpscale);
+    gl.deleteFramebuffer(this.fboFinalEnh);
     gl.deleteProgram(this.progInterp);
     gl.deleteProgram(this.progFsr);
     gl.deleteProgram(this.progRcas);
     gl.deleteProgram(this.progAnime4k);
     gl.deleteProgram(this.progBilinear);
+    gl.deleteProgram(this.progComposite);
   }
 }

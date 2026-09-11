@@ -1,197 +1,413 @@
-// GLSS Content Script
-// Injects floating hover enhancement button on all HTML5 <video> elements
-// Launches Document Picture-in-Picture or in-page theater player
+// GLSS Content Script - Edge VSR Style Streaming Video Enhancement
+// In-Place GPU Super-Resolution & Motion-Compensated Frame Interpolation for Bilibili, YouTube & Streaming Platforms
 
-(function() {
+(async function() {
   if (window.__glssInjected) return;
   window.__glssInjected = true;
 
-  console.log("[GLSS Content Script] 视频增强脚本已加载。");
+  console.log("[GLSS] 正在加载流媒体增强引擎 (Edge VSR 体验)...");
 
-  // Track active videos and their floating buttons
-  const attachedVideos = new WeakSet();
-
-  function attachWidgetToVideo(video) {
-    if (attachedVideos.has(video)) return;
-    attachedVideos.add(video);
-
-    // Ensure parent allows relative positioning or create wrapper
-    let parent = video.parentElement;
-    if (!parent) return;
-
-    // Create floating widget
-    const widget = document.createElement("div");
-    widget.className = "glss-floating-widget";
-    widget.innerHTML = `
-      <div class="glss-widget-badge">⚡ GLSS</div>
-      <button class="glss-widget-btn" title="一键开启 GPU 超分辨率与插帧独立小窗">
-        <span>🚀 一键超分插帧</span>
-      </button>
-    `;
-
-    // Append widget to parent or body
-    parent.classList.add("glss-video-wrapper");
-    if (getComputedStyle(parent).position === "static") {
-      parent.style.position = "relative";
-    }
-    parent.appendChild(widget);
-
-    // Mouse movement detection for responsive show/hide
-    let hideTimer = null;
-    const showWidget = () => {
-      widget.classList.add("glss-visible");
-      clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => {
-        widget.classList.remove("glss-visible");
-      }, 3000);
-    };
-
-    video.addEventListener("mousemove", showWidget);
-    widget.addEventListener("mouseenter", () => {
-      clearTimeout(hideTimer);
-      widget.classList.add("glss-visible");
-    });
-    widget.addEventListener("mouseleave", () => {
-      hideTimer = setTimeout(() => {
-        widget.classList.remove("glss-visible");
-      }, 1000);
-    });
-
-    // Click handler: Launch Enhanced PiP
-    const launchBtn = widget.querySelector(".glss-widget-btn");
-    launchBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      openEnhancedPlayer(video);
-    });
+  // Dynamically import pure GPU engine from extension
+  let GlssGpuEngine;
+  try {
+    const mod = await import(chrome.runtime.getURL("renderer/glss-gpu.js"));
+    GlssGpuEngine = mod.GlssGpuEngine;
+  } catch (err) {
+    console.error("[GLSS] 导入 GPU 渲染模块失败:", err);
+    return;
   }
 
-  // Launches Document PiP or In-Page Modal
-  async function openEnhancedPlayer(video) {
-    window.__glssActiveVideo = video;
-    const w = video.videoWidth || 960;
-    const h = video.videoHeight || 540;
+  const enhancedVideoSessions = new WeakMap();
 
-    // Try modern Document Picture-in-Picture API first
-    if ("documentPictureInPicture" in window) {
-      try {
-        const pipWindow = await window.documentPictureInPicture.requestWindow({
-          width: Math.min(1280, Math.max(640, w)),
-          height: Math.min(720, Math.max(360, h))
-        });
+  // Find the appropriate player container for streaming platforms
+  function findPlatformPlayerContainer(video) {
+    // Bilibili
+    const bpxWrap = video.closest(".bpx-player-video-wrap") || video.closest(".bilibili-player-video-wrap") || video.closest(".bpx-player-container");
+    if (bpxWrap) return bpxWrap;
 
-        // Pass video reference
-        pipWindow.__glssSourceVideo = video;
+    // YouTube
+    const ytWrap = video.closest(".html5-video-container") || video.closest("#movie_player");
+    if (ytWrap) return ytWrap;
 
-        // Copy styles or inject link to pip.css
-        const styleLink = pipWindow.document.createElement("link");
-        styleLink.rel = "stylesheet";
-        styleLink.href = chrome.runtime.getURL("renderer/pip.css");
-        pipWindow.document.head.appendChild(styleLink);
+    // Tencent / iQiyi / Youku / Generic
+    const genericWrap = video.closest(".txp_video_container") || video.closest(".iqp-player") || video.parentElement;
+    return genericWrap || video.parentElement;
+  }
 
-        // Fetch and inject pip.html content into pipWindow
-        const resp = await fetch(chrome.runtime.getURL("renderer/pip.html"));
-        const html = await resp.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, "text/html");
+  class VideoEnhanceSession {
+    constructor(video) {
+      this.video = video;
+      this.container = findPlatformPlayerContainer(video);
+      this.isEnabled = false;
+      this.isSplitScreen = false;
+      this.splitPos = 0.5;
 
-        // Transfer body container
-        const container = doc.getElementById("glss-container");
-        pipWindow.document.body.appendChild(container);
+      this.interpMultiplier = 2; // 2x default (60 FPS)
+      this.upscaleMethod = "fsr";
+      this.scaleFactor = 1.5;
+      this.sharpness = 0.8;
 
-        // Inject module script
-        const script = pipWindow.document.createElement("script");
-        script.type = "module";
-        script.src = chrome.runtime.getURL("renderer/pip.js");
-        pipWindow.document.body.appendChild(script);
+      this.canvas = null;
+      this.engine = null;
+      this.rvfcHandle = null;
+      this.rafHandle = null;
 
-        console.log("[GLSS] 已成功打开 Document Picture-in-Picture 小窗。");
+      this.pillEl = null;
+      this.flyoutEl = null;
+      this.splitEl = null;
+
+      this.initUI();
+    }
+
+    initUI() {
+      if (!this.container) return;
+      this.container.classList.add("glss-player-container");
+      if (getComputedStyle(this.container).position === "static") {
+        this.container.style.position = "relative";
+      }
+
+      // 1. Edge-style Capsule Pill
+      this.pillEl = document.createElement("div");
+      this.pillEl.className = "glss-edge-pill";
+      this.pillEl.innerHTML = `
+        <div class="glss-pill-icon">⚡</div>
+        <span class="glss-pill-title">增强视频</span>
+        <div class="glss-pill-switch" title="开启 / 关闭 GLSS 纯显卡视频增强">
+          <div class="glss-pill-thumb"></div>
+        </div>
+      `;
+      this.container.appendChild(this.pillEl);
+
+      // Mouse auto-hide logic
+      let hideTimer = null;
+      const showPill = () => {
+        this.pillEl.classList.add("glss-visible");
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => {
+          if (!this.flyoutEl || this.flyoutEl.style.display === "none") {
+            this.pillEl.classList.remove("glss-visible");
+          }
+        }, 3000);
+      };
+
+      this.container.addEventListener("mousemove", showPill);
+      this.pillEl.addEventListener("mouseenter", () => {
+        clearTimeout(hideTimer);
+        this.pillEl.classList.add("glss-visible");
+      });
+
+      // Switch toggle click
+      const switchEl = this.pillEl.querySelector(".glss-pill-switch");
+      switchEl.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.toggleEnhancement();
+      });
+
+      // Clicking text or icon toggles Flyout menu
+      this.pillEl.addEventListener("click", (e) => {
+        if (e.target.closest(".glss-pill-switch")) return;
+        e.stopPropagation();
+        this.toggleFlyout();
+      });
+
+      // Close flyout on outside click
+      document.addEventListener("click", (e) => {
+        if (this.flyoutEl && !this.flyoutEl.contains(e.target) && !this.pillEl.contains(e.target)) {
+          this.flyoutEl.style.display = "none";
+        }
+      });
+    }
+
+    toggleFlyout() {
+      if (!this.flyoutEl) {
+        this.createFlyout();
+      }
+      const isHidden = (this.flyoutEl.style.display === "none");
+      this.flyoutEl.style.display = isHidden ? "flex" : "none";
+      if (isHidden) {
+        this.pillEl.classList.add("glss-visible");
+        this.updateFlyoutStats();
+      }
+    }
+
+    createFlyout() {
+      this.flyoutEl = document.createElement("div");
+      this.flyoutEl.className = "glss-edge-flyout";
+      this.flyoutEl.style.display = "none";
+      this.flyoutEl.innerHTML = `
+        <div class="glss-flyout-header">
+          <span>⚡ 视频增强 (GLSS GPU)</span>
+          <span style="font-size: 10px; color: #818cf8;">Pure GPU</span>
+        </div>
+
+        <div class="glss-flyout-row">
+          <label>超分辨率算法</label>
+          <select class="glss-flyout-select" id="glss-opt-method">
+            <option value="fsr" selected>FSR + RCAS</option>
+            <option value="anime4k">Anime4K</option>
+            <option value="bilinear">Bilinear</option>
+          </select>
+        </div>
+
+        <div class="glss-flyout-row">
+          <label>帧插值倍率</label>
+          <select class="glss-flyout-select" id="glss-opt-interp">
+            <option value="1">关闭 (1x)</option>
+            <option value="2" selected>2x 插帧 (60FPS)</option>
+            <option value="3">3x 插帧 (90FPS)</option>
+            <option value="4">4x 插帧 (120FPS+)</option>
+          </select>
+        </div>
+
+        <div class="glss-flyout-row">
+          <label>放大倍率</label>
+          <select class="glss-flyout-select" id="glss-opt-scale">
+            <option value="1.0">1.0x (原尺寸)</option>
+            <option value="1.5" selected>1.5x (推荐)</option>
+            <option value="2.0">2.0x (超高清)</option>
+          </select>
+        </div>
+
+        <div class="glss-flyout-row">
+          <label>分屏对比模式</label>
+          <input type="checkbox" id="glss-opt-split">
+        </div>
+
+        <div class="glss-flyout-hud-bar">
+          <span>FPS: <b id="glss-hud-fps" class="glss-flyout-hud-val">--</b></span>
+          <span>GPU: <b id="glss-hud-time" class="glss-flyout-hud-val">--</b></span>
+        </div>
+
+        <button class="glss-flyout-btn" id="glss-btn-pip">
+          🪟 弹出独立画中画小窗 (Document PiP)
+        </button>
+      `;
+
+      this.container.appendChild(this.flyoutEl);
+
+      // Event bindings
+      const optMethod = this.flyoutEl.querySelector("#glss-opt-method");
+      const optInterp = this.flyoutEl.querySelector("#glss-opt-interp");
+      const optScale = this.flyoutEl.querySelector("#glss-opt-scale");
+      const optSplit = this.flyoutEl.querySelector("#glss-opt-split");
+      const btnPip = this.flyoutEl.querySelector("#glss-btn-pip");
+
+      optMethod.addEventListener("change", () => {
+        this.upscaleMethod = optMethod.value;
+        if (this.engine) this.engine.upscaleMethod = this.upscaleMethod;
+      });
+
+      optInterp.addEventListener("change", () => {
+        this.interpMultiplier = parseInt(optInterp.value, 10);
+        if (this.engine) this.engine.interpMultiplier = this.interpMultiplier;
+      });
+
+      optScale.addEventListener("change", () => {
+        this.scaleFactor = parseFloat(optScale.value);
+        if (this.engine) {
+          this.engine.scaleFactor = this.scaleFactor;
+          this.engine.updateDimensions(this.video.videoWidth, this.video.videoHeight);
+        }
+      });
+
+      optSplit.addEventListener("change", () => {
+        this.isSplitScreen = optSplit.checked;
+        if (this.engine) this.engine.splitScreen = this.isSplitScreen;
+        this.toggleSplitBar(this.isSplitScreen);
+      });
+
+      btnPip.addEventListener("click", () => {
+        this.openDocumentPiP();
+      });
+    }
+
+    updateFlyoutStats() {
+      if (!this.flyoutEl || !this.engine) return;
+      const fpsEl = this.flyoutEl.querySelector("#glss-hud-fps");
+      const timeEl = this.flyoutEl.querySelector("#glss-hud-time");
+      if (fpsEl) fpsEl.textContent = `${this.engine.stats.srcFps} ➔ ${this.engine.stats.renderFps}`;
+      if (timeEl) timeEl.textContent = `${this.engine.stats.gpuTimeMs}ms`;
+    }
+
+    toggleEnhancement() {
+      this.isEnabled = !this.isEnabled;
+      const switchEl = this.pillEl.querySelector(".glss-pill-switch");
+
+      if (this.isEnabled) {
+        switchEl.classList.add("active");
+        this.startInPlacePipeline();
+        console.log("[GLSS] 纯 GPU 视频增强已原位开启。");
+      } else {
+        switchEl.classList.remove("active");
+        this.stopInPlacePipeline();
+        console.log("[GLSS] 纯 GPU 视频增强已关闭。");
+      }
+    }
+
+    startInPlacePipeline() {
+      if (!this.canvas) {
+        this.canvas = document.createElement("canvas");
+        this.canvas.className = "glss-in-place-canvas";
+        // Insert right next to video
+        this.video.parentElement.insertBefore(this.canvas, this.video.nextSibling);
+
+        this.engine = new GlssGpuEngine(this.canvas);
+        this.engine.scaleFactor = this.scaleFactor;
+        this.engine.sharpness = this.sharpness;
+        this.engine.upscaleMethod = this.upscaleMethod;
+        this.engine.interpMultiplier = this.interpMultiplier;
+        this.engine.splitScreen = this.isSplitScreen;
+        this.engine.splitPosition = this.splitPos;
+      }
+
+      this.canvas.classList.add("glss-active");
+      this.video.classList.add("glss-video-enhanced");
+
+      // Video frame clock (requestVideoFrameCallback)
+      const onVideoFrame = () => {
+        if (!this.isEnabled) return;
+        if (this.engine && this.video.videoWidth > 0) {
+          this.engine.pushVideoFrame(this.video);
+        }
+        if ("requestVideoFrameCallback" in this.video) {
+          this.rvfcHandle = this.video.requestVideoFrameCallback(onVideoFrame);
+        }
+      };
+
+      if ("requestVideoFrameCallback" in this.video) {
+        this.rvfcHandle = this.video.requestVideoFrameCallback(onVideoFrame);
+      }
+
+      // Display render clock
+      const renderLoop = () => {
+        if (!this.isEnabled) return;
+
+        if (this.engine && this.engine.hasPrevFrame) {
+          const now = performance.now();
+          const elapsed = now - this.engine.lastFrameArrivalTime;
+          const interval = this.engine.frameDuration || (1000 / 30);
+          const phase = Math.min(1.0, elapsed / interval);
+          this.engine.renderFrame(this.interpMultiplier >= 2 ? phase : 1.0);
+        }
+
+        if (this.flyoutEl && this.flyoutEl.style.display !== "none") {
+          this.updateFlyoutStats();
+        }
+
+        this.rafHandle = requestAnimationFrame(renderLoop);
+      };
+      this.rafHandle = requestAnimationFrame(renderLoop);
+    }
+
+    stopInPlacePipeline() {
+      if (this.canvas) {
+        this.canvas.classList.remove("glss-active");
+      }
+      this.video.classList.remove("glss-video-enhanced");
+
+      if (this.rafHandle) {
+        cancelAnimationFrame(this.rafHandle);
+        this.rafHandle = null;
+      }
+      if (this.isSplitScreen) {
+        this.toggleSplitBar(false);
+      }
+    }
+
+    toggleSplitBar(show) {
+      if (!show) {
+        if (this.splitEl) {
+          this.splitEl.remove();
+          this.splitEl = null;
+        }
         return;
-      } catch (err) {
-        console.warn("[GLSS] Document PiP 启动异常，降级到页面内浮窗:", err);
       }
+
+      if (this.splitEl) return;
+      this.splitEl = document.createElement("div");
+      this.splitEl.className = "glss-split-divider";
+      this.splitEl.style.left = "50%";
+      this.splitEl.innerHTML = `
+        <div class="glss-split-handle">⇄</div>
+        <div class="glss-split-label glss-split-label-left">原画 (无插帧)</div>
+        <div class="glss-split-label glss-split-label-right">GLSS (超分+插帧)</div>
+      `;
+      this.container.appendChild(this.splitEl);
+
+      let isDragging = false;
+      this.splitEl.addEventListener("mousedown", (e) => {
+        isDragging = true;
+        e.preventDefault();
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+        const rect = this.container.getBoundingClientRect();
+        let ratio = (e.clientX - rect.left) / rect.width;
+        ratio = Math.max(0.05, Math.min(0.95, ratio));
+        this.splitPos = ratio;
+        this.splitEl.style.left = `${(ratio * 100).toFixed(1)}%`;
+        if (this.engine) this.engine.splitPosition = ratio;
+      });
+
+      window.addEventListener("mouseup", () => {
+        isDragging = false;
+      });
     }
 
-    // Fallback: In-Page Floating Window
-    openInPageModal(video, w, h);
+    async openDocumentPiP() {
+      if ("documentPictureInPicture" in window) {
+        try {
+          const pipWindow = await window.documentPictureInPicture.requestWindow({
+            width: Math.min(1280, Math.max(640, this.video.videoWidth || 960)),
+            height: Math.min(720, Math.max(360, this.video.videoHeight || 540))
+          });
+
+          pipWindow.__glssSourceVideo = this.video;
+
+          const styleLink = pipWindow.document.createElement("link");
+          styleLink.rel = "stylesheet";
+          styleLink.href = chrome.runtime.getURL("renderer/pip.css");
+          pipWindow.document.head.appendChild(styleLink);
+
+          const resp = await fetch(chrome.runtime.getURL("renderer/pip.html"));
+          const html = await resp.text();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(html, "text/html");
+
+          const container = doc.getElementById("glss-container");
+          pipWindow.document.body.appendChild(container);
+
+          const script = pipWindow.document.createElement("script");
+          script.type = "module";
+          script.src = chrome.runtime.getURL("renderer/pip.js");
+          pipWindow.document.body.appendChild(script);
+
+          console.log("[GLSS] 已成功唤出 Document PiP 小窗。");
+        } catch (err) {
+          console.warn("[GLSS] Document PiP 失败:", err);
+        }
+      }
+    }
   }
 
-  function openInPageModal(video, w, h) {
-    const existing = document.getElementById("glss-inpage-modal");
-    if (existing) existing.remove();
-
-    const modal = document.createElement("div");
-    modal.id = "glss-inpage-modal";
-    modal.className = "glss-modal-overlay";
-    modal.style.width = `${Math.min(960, Math.max(540, w))}px`;
-    modal.style.height = `${Math.min(540, Math.max(320, h))}px`;
-
-    modal.innerHTML = `
-      <div class="glss-modal-header" id="glss-modal-drag">
-        <div class="glss-modal-title">⚡ GLSS 视频增强独立浮窗 (Pure GPU)</div>
-        <button class="glss-modal-close" id="glss-modal-close" title="关闭浮窗">✕</button>
-      </div>
-      <iframe class="glss-modal-iframe" src="${chrome.runtime.getURL("renderer/pip.html")}"></iframe>
-    `;
-
-    document.body.appendChild(modal);
-
-    // Pass video reference to iframe when loaded
-    const iframe = modal.querySelector(".glss-modal-iframe");
-    iframe.addEventListener("load", () => {
-      try {
-        iframe.contentWindow.__glssSourceVideo = video;
-        iframe.contentWindow.postMessage({ type: "GLSS_ATTACH_VIDEO" }, "*");
-      } catch (e) {
-        console.warn("[GLSS] Iframe 跨域限制:", e);
+  // Scan all HTML5 video players on the page
+  function scanAndAttach() {
+    document.querySelectorAll("video").forEach((video) => {
+      if (!enhancedVideoSessions.has(video) && video.videoWidth >= 0) {
+        const session = new VideoEnhanceSession(video);
+        enhancedVideoSessions.set(video, session);
       }
     });
-
-    modal.querySelector("#glss-modal-close").addEventListener("click", () => {
-      modal.remove();
-    });
-
-    // Make modal draggable
-    const header = modal.querySelector("#glss-modal-drag");
-    let isDragging = false;
-    let startX, startY, initLeft, initTop;
-
-    header.addEventListener("mousedown", (e) => {
-      if (e.target.tagName === "BUTTON") return;
-      isDragging = true;
-      startX = e.clientX;
-      startY = e.clientY;
-      const rect = modal.getBoundingClientRect();
-      initLeft = rect.left;
-      initTop = rect.top;
-      e.preventDefault();
-    });
-
-    window.addEventListener("mousemove", (e) => {
-      if (!isDragging) return;
-      modal.style.left = `${initLeft + (e.clientX - startX)}px`;
-      modal.style.top = `${initTop + (e.clientY - startY)}px`;
-      modal.style.right = "auto";
-    });
-
-    window.addEventListener("mouseup", () => {
-      isDragging = false;
-    });
   }
 
-  // Scan all existing and dynamically inserted videos
-  function scanVideos() {
-    document.querySelectorAll("video").forEach(attachWidgetToVideo);
-  }
+  scanAndAttach();
 
-  scanVideos();
-
-  // MutationObserver for SPA / dynamically injected players (Bilibili, YouTube, etc.)
+  // Watch for dynamic DOM modifications (Bilibili / YouTube navigation without full page reload)
   const observer = new MutationObserver(() => {
-    scanVideos();
+    scanAndAttach();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
-  // Periodically check every 2 seconds for players in shadow DOM or delayed insertion
-  setInterval(scanVideos, 2000);
+  setInterval(scanAndAttach, 2000);
 })();

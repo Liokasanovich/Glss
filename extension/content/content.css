@@ -1,130 +1,254 @@
-/* GLSS Floating Button & In-Page Enhanced Player Styles */
+/* GLSS Browser Video Enhancement - Edge VSR Style In-Place & Floating UI */
 
-.glss-floating-widget {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  z-index: 999999;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(15, 23, 42, 0.85);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(99, 102, 241, 0.4);
-  border-radius: 24px;
-  padding: 4px 8px 4px 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 12px rgba(99, 102, 241, 0.3);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  color: #fff;
+/* 1. In-Place Canvas (Directly replaces video visuals while keeping native controls & danmaku untouched) */
+.glss-in-place-canvas {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  pointer-events: none !important;
+  z-index: 1 !important;
   opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.25s ease, transform 0.25s ease;
+  transition: opacity 0.2s ease;
+  image-rendering: pixelated;
+}
+
+.glss-in-place-canvas.glss-active {
+  opacity: 1 !important;
+}
+
+/* Hide original video visual when in-place enhanced canvas is active (keeps audio/MSE intact) */
+video.glss-video-enhanced {
+  opacity: 0 !important;
+}
+
+/* 2. Edge VSR Style Capsule Pill (Pinned to top-right of the streaming video player) */
+.glss-edge-pill {
+  position: absolute !important;
+  top: 16px !important;
+  right: 16px !important;
+  z-index: 100000 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  background: rgba(18, 24, 38, 0.88) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1px solid rgba(99, 102, 241, 0.35) !important;
+  border-radius: 20px !important;
+  padding: 5px 12px !important;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45), 0 0 10px rgba(99, 102, 241, 0.2) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  color: #f1f5f9 !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  opacity: 0;
   transform: translateY(-4px);
-  user-select: none;
+  transition: opacity 0.25s ease, transform 0.25s ease, border-color 0.2s ease !important;
 }
 
-/* Show on hover */
-.glss-video-wrapper:hover .glss-floating-widget,
-.glss-floating-widget.glss-visible {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
+/* Show pill on player hover */
+.glss-player-container:hover .glss-edge-pill,
+.glss-edge-pill.glss-visible,
+.glss-edge-pill:hover {
+  opacity: 1 !important;
+  transform: translateY(0) !important;
 }
 
-.glss-widget-badge {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #60a5fa, #a855f7);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  cursor: pointer;
+.glss-pill-icon {
+  font-size: 13px !important;
+  color: #60a5fa !important;
+  display: flex !important;
+  align-items: center !important;
+  filter: drop-shadow(0 0 4px #60a5fa);
 }
 
-.glss-widget-btn {
-  background: linear-gradient(135deg, #4f46e5, #3b82f6);
-  border: none;
-  color: #ffffff;
-  padding: 5px 12px;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 16px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.4);
-  transition: all 0.2s ease;
+.glss-pill-title {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.3px !important;
+  color: #e2e8f0 !important;
 }
 
-.glss-widget-btn:hover {
-  background: linear-gradient(135deg, #6366f1, #60a5fa);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.6);
-  transform: scale(1.04);
+/* Mini Fluent Toggle Switch */
+.glss-pill-switch {
+  position: relative !important;
+  width: 28px !important;
+  height: 16px !important;
+  background: #334155 !important;
+  border-radius: 10px !important;
+  transition: background 0.2s ease !important;
 }
 
-.glss-widget-btn:active {
-  transform: scale(0.97);
+.glss-pill-switch.active {
+  background: #4f46e5 !important;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.6) !important;
 }
 
-/* In-Page Modal Window Fallback */
-.glss-modal-overlay {
-  position: fixed;
-  top: 50px;
-  right: 50px;
-  width: 720px;
-  height: 440px;
-  background: #0f172a;
-  border: 1px solid rgba(99, 102, 241, 0.5);
-  border-radius: 12px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 20px rgba(99, 102, 241, 0.3);
-  z-index: 2147483647;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  resize: both;
+.glss-pill-thumb {
+  position: absolute !important;
+  top: 2px !important;
+  left: 2px !important;
+  width: 12px !important;
+  height: 12px !important;
+  background: #ffffff !important;
+  border-radius: 50% !important;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-.glss-modal-header {
-  height: 36px;
-  background: #1e293b;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 12px;
-  cursor: move;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+.glss-pill-switch.active .glss-pill-thumb {
+  transform: translateX(12px) !important;
 }
 
-.glss-modal-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #60a5fa;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+/* 3. Edge-Style Flyout Menu (Dropdown configuration card) */
+.glss-edge-flyout {
+  position: absolute !important;
+  top: 48px !important;
+  right: 16px !important;
+  width: 280px !important;
+  background: rgba(15, 23, 42, 0.94) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(99, 102, 241, 0.4) !important;
+  border-radius: 12px !important;
+  padding: 14px !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(99, 102, 241, 0.25) !important;
+  z-index: 100001 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  font-size: 12px !important;
+  color: #cbd5e1 !important;
+  animation: glssFadeIn 0.15s ease-out !important;
 }
 
-.glss-modal-close {
-  background: transparent;
-  border: none;
-  color: #94a3b8;
-  font-size: 16px;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 4px;
+@keyframes glssFadeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.glss-modal-close:hover {
-  background: #ef4444;
-  color: #fff;
+.glss-flyout-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding-bottom: 8px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  font-weight: 700 !important;
+  color: #60a5fa !important;
 }
 
-.glss-modal-iframe {
-  flex: 1;
-  width: 100%;
-  height: calc(100% - 36px);
-  border: none;
+.glss-flyout-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+.glss-flyout-row label {
+  color: #f1f5f9 !important;
+  font-weight: 500 !important;
+}
+
+.glss-flyout-select {
+  background: #1e293b !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  color: #f1f5f9 !important;
+  padding: 3px 6px !important;
+  border-radius: 4px !important;
+  font-size: 11px !important;
+  outline: none !important;
+}
+
+.glss-flyout-btn {
+  background: rgba(30, 41, 59, 0.8) !important;
+  border: 1px solid rgba(99, 102, 241, 0.3) !important;
+  color: #e2e8f0 !important;
+  padding: 6px 10px !important;
+  border-radius: 6px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  transition: all 0.15s ease !important;
+}
+
+.glss-flyout-btn:hover {
+  background: rgba(99, 102, 241, 0.35) !important;
+  border-color: #6366f1 !important;
+  color: #fff !important;
+}
+
+.glss-flyout-hud-bar {
+  background: rgba(0, 0, 0, 0.3) !important;
+  border-radius: 6px !important;
+  padding: 6px 8px !important;
+  font-size: 10px !important;
+  font-family: monospace !important;
+  color: #94a3b8 !important;
+  display: flex !important;
+  justify-content: space-between !important;
+}
+
+.glss-flyout-hud-val {
+  color: #38bdf8 !important;
+  font-weight: 600 !important;
+}
+
+/* 4. Split-Screen Draggable Bar (Edge VSR Style) */
+.glss-split-divider {
+  position: absolute !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 4px !important;
+  background: #38bdf8 !important;
+  box-shadow: 0 0 10px #38bdf8, 0 0 20px rgba(56, 189, 248, 0.6) !important;
+  z-index: 10000 !important;
+  cursor: ew-resize !important;
+  pointer-events: auto !important;
+}
+
+.glss-split-handle {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: 32px !important;
+  height: 32px !important;
+  background: rgba(15, 23, 42, 0.9) !important;
+  border: 2px solid #38bdf8 !important;
+  border-radius: 50% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 12px !important;
+  color: #38bdf8 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+}
+
+.glss-split-label {
+  position: absolute !important;
+  top: 20px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  padding: 3px 8px !important;
+  border-radius: 4px !important;
+  background: rgba(0, 0, 0, 0.7) !important;
+  color: #fff !important;
+  pointer-events: none !important;
+  z-index: 10000 !important;
+}
+
+.glss-split-label-left {
+  left: 20px !important;
+  border-left: 2px solid #94a3b8 !important;
+}
+
+.glss-split-label-right {
+  right: 20px !important;
+  border-right: 2px solid #38bdf8 !important;
+  color: #38bdf8 !important;
 }
