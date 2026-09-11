@@ -11,7 +11,7 @@
 ## 核心技术特性
 
 * 🚀 **Vulkan 计算后端**：超分辨率由真实的 Vulkan Compute Pipeline 执行（内嵌预编译 SPIR-V，运行时动态加载 `libvulkan`，无需链接期依赖）；无可用 GPU 时自动回退到等价的 CPU 实现。
-* ⚡ **帧插值 (Frame Interpolation)**：基于时域双帧历史与块匹配运动估计（SAD）的运动补偿插帧，默认 `2x`（`60 FPS -> 120 FPS`），并支持任意 `Nx`（`--multiplier N`）。
+* ⚡ **帧插值 (Frame Interpolation)**：基于 Vulkan Compute GPU 运动补偿与时域双帧历史的纯 GPU 插帧（内嵌 SPIR-V，自动回退到 CPU SAD 块匹配），默认 `2x`（`60 FPS -> 120 FPS`），并支持任意 `Nx`（`--multiplier N`）。
 * 💎 **超分辨率缩放 (Super Resolution)**：`Bilinear` 与边缘自适应的 `FSR` 路径，叠加 RCAS 对比度自适应锐化。`Anime4K` / `CustomShader` 目前复用 FSR 路径（自定义着色器尚未实现）。
 * 🖥️ **跨平台窗口捕获**：Linux 通过 `dlopen` 动态加载 X11（无链接期依赖）；Windows 使用 DXGI Desktop Duplication。无显示环境可使用 `--headless` 合成画面源。
 * 🛠️ **第一性与最简原则**：零繁重框架依赖，纯 C++17 构建，单文件极简 CMake，开箱即用。
@@ -56,8 +56,8 @@ ctest --test-dir build --output-on-failure
 | :--- | :--- | :--- |
 | 窗口捕获 | X11（`dlopen`，运行期加载） | DXGI Desktop Duplication |
 | Vulkan 后端 | 运行期 `dlopen("libvulkan.so.1")` | 运行期 `LoadLibrary("vulkan-1.dll")` |
-| 超分 | Vulkan Compute + CPU 回退 | Vulkan Compute + CPU 回退 |
-| 帧插值 | CPU 运动补偿（`Nx`） | CPU 运动补偿（`Nx`） |
+| 超分 | Vulkan Compute (纯 GPU) + CPU 回退 | Vulkan Compute (纯 GPU) + CPU 回退 |
+| 帧插值 | Vulkan Compute (纯 GPU) + CPU 回退 | Vulkan Compute (纯 GPU) + CPU 回退 |
 
 * **Wayland 捕获**：尚未实现（当前为 X11；Wayland 下可通过 XWayland 或后续 Portal 后端支持）。
 * **Vulkan 依赖**：仅使用内嵌 SPIR-V 计算着色器，构建期不依赖 Vulkan SDK / `glslangValidator`。

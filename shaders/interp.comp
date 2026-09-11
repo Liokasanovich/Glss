@@ -1,0 +1,172 @@
+#version 450
+
+// GLSS GPU Frame Interpolation Compute Shader
+// Performs pure GPU motion-compensated temporal frame interpolation.
+//
+// Buffers hold tightly packed RGBA8 pixels as little-endian uint32:
+//   byte0 = R, byte1 = G, byte2 = B, byte3 = A.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(std430, binding = 0) readonly buffer PrevIn {
+    uint prev_data[];
+};
+
+layout(std430, binding = 1) readonly buffer CurrIn {
+    uint curr_data[];
+};
+
+layout(std430, binding = 2) writeonly buffer Out {
+    uint out_data[];
+};
+
+layout(push_constant) uniform InterpPushConstants {
+    uint width;
+    uint height;
+    float t;            // Normalized interpolation phase: 0.0 to 1.0
+    uint mode;          // 0: motion-compensated SAD, 1: temporal blend
+    int search_radius;  // Motion search radius (e.g. 4 ~ 8)
+} pc;
+
+vec4 UnpackRGBA(uint p) {
+    return vec4(float(p & 0xFFu), float((p >> 8) & 0xFFu), float((p >> 16) & 0xFFu),
+                float((p >> 24) & 0xFFu));
+}
+
+uint PackRGBA(uvec4 q) {
+    return q.x | (q.y << 8) | (q.z << 16) | (q.w << 24);
+}
+
+float Luma(vec4 c) {
+    return dot(c.rgb, vec3(0.299, 0.587, 0.114));
+}
+
+vec4 SampleBilinear(bool is_prev, float fx, float fy) {
+    const float max_x = float(pc.width - 1u);
+    const float max_y = float(pc.height - 1u);
+    fx = clamp(fx, 0.0, max_x);
+    fy = clamp(fy, 0.0, max_y);
+
+    const uint x0 = uint(fx);
+    const uint y0 = uint(fy);
+    const uint x1 = min(x0 + 1u, pc.width - 1u);
+    const uint y1 = min(y0 + 1u, pc.height - 1u);
+    const float dx = fx - float(x0);
+    const float dy = fy - float(y0);
+
+    const uint idx00 = y0 * pc.width + x0;
+    const uint idx10 = y0 * pc.width + x1;
+    const uint idx01 = y1 * pc.width + x0;
+    const uint idx11 = y1 * pc.width + x1;
+
+    vec4 v00, v10, v01, v11;
+    if (is_prev) {
+        v00 = UnpackRGBA(prev_data[idx00]);
+        v10 = UnpackRGBA(prev_data[idx10]);
+        v01 = UnpackRGBA(prev_data[idx01]);
+        v11 = UnpackRGBA(prev_data[idx11]);
+    } else {
+        v00 = UnpackRGBA(curr_data[idx00]);
+        v10 = UnpackRGBA(curr_data[idx10]);
+        v01 = UnpackRGBA(curr_data[idx01]);
+        v11 = UnpackRGBA(curr_data[idx11]);
+    }
+
+    const vec4 top = mix(v00, v10, dx);
+    const vec4 bot = mix(v01, v11, dx);
+    return mix(top, bot, dy);
+}
+
+// Estimates local motion vector using Sum of Absolute Differences (SAD)
+// on a local 5x5 patch over search radius R around (ox, oy).
+vec2 EstimateMotionVector(uint ox, uint oy, int radius) {
+    float best_cost = 1e9;
+    vec2 best_mv = vec2(0.0);
+
+    const int w = int(pc.width);
+    const int h = int(pc.height);
+    const int x = int(ox);
+    const int y = int(oy);
+
+    // Diamond / step search for performance and smoothness
+    for (int dy = -radius; dy <= radius; dy += 2) {
+        for (int dx = -radius; dx <= radius; dx += 2) {
+            float sad = 0.0;
+            // 3x3 downsampled patch
+            for (int py = -2; py <= 2; py += 2) {
+                int sy0 = clamp(y + py, 0, h - 1);
+                int sy1 = clamp(y + py + dy, 0, h - 1);
+                for (int px = -2; px <= 2; px += 2) {
+                    int sx0 = clamp(x + px, 0, w - 1);
+                    int sx1 = clamp(x + px + dx, 0, w - 1);
+
+                    vec4 c0 = UnpackRGBA(prev_data[uint(sy0) * pc.width + uint(sx0)]);
+                    vec4 c1 = UnpackRGBA(curr_data[uint(sy1) * pc.width + uint(sx1)]);
+                    sad += abs(Luma(c0) - Luma(c1));
+                }
+            }
+
+            // Regularization penalty against large motion vectors
+            float cost = sad + float(abs(dx) + abs(dy)) * 0.5;
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_mv = vec2(float(dx), float(dy));
+            }
+        }
+    }
+
+    // Subpixel refinement around best integer vector
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            vec2 cand = best_mv + vec2(float(dx), float(dy));
+            int sy0 = clamp(y, 0, h - 1);
+            int sy1 = clamp(y + int(cand.y), 0, h - 1);
+            int sx0 = clamp(x, 0, w - 1);
+            int sx1 = clamp(x + int(cand.x), 0, w - 1);
+
+            vec4 c0 = UnpackRGBA(prev_data[uint(sy0) * pc.width + uint(sx0)]);
+            vec4 c1 = UnpackRGBA(curr_data[uint(sy1) * pc.width + uint(sx1)]);
+            float cost = abs(Luma(c0) - Luma(c1)) + length(cand) * 0.5;
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_mv = cand;
+            }
+        }
+    }
+
+    return best_mv;
+}
+
+void main() {
+    const uint ox = gl_GlobalInvocationID.x;
+    const uint oy = gl_GlobalInvocationID.y;
+    if (ox >= pc.width || oy >= pc.height) {
+        return;
+    }
+
+    const float t = clamp(pc.t, 0.0, 1.0);
+    vec4 result;
+
+    if (pc.mode == 1u || pc.search_radius <= 0) {
+        // Pure linear temporal blend
+        vec4 p0 = UnpackRGBA(prev_data[oy * pc.width + ox]);
+        vec4 p1 = UnpackRGBA(curr_data[oy * pc.width + ox]);
+        result = mix(p0, p1, t);
+    } else {
+        // GPU Motion Compensated Interpolation
+        int radius = clamp(pc.search_radius, 2, 8);
+        vec2 mv = EstimateMotionVector(ox, oy, radius);
+
+        float sx0 = float(ox) - t * mv.x;
+        float sy0 = float(oy) - t * mv.y;
+        float sx1 = float(ox) + (1.0 - t) * mv.x;
+        float sy1 = float(oy) + (1.0 - t) * mv.y;
+
+        vec4 sample0 = SampleBilinear(true, sx0, sy0);
+        vec4 sample1 = SampleBilinear(false, sx1, sy1);
+
+        result = mix(sample0, sample1, t);
+    }
+
+    out_data[oy * pc.width + ox] = PackRGBA(uvec4(clamp(result, 0.0, 255.0)));
+}

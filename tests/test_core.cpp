@@ -378,6 +378,40 @@ void TestGpuSuperResolution() {
     CHECK(mae2 < 8.0);
 }
 
+void TestGpuFrameInterpolation() {
+    std::cout << "[glss_tests] -- GPU frame interpolation --" << std::endl;
+    auto ctx = std::make_shared<glss::VulkanContext>();
+    if (!ctx->Initialize(0)) {
+        std::cout << "[glss_tests] Vulkan not available; skipping GPU Frame Interpolation test." << std::endl;
+        return;
+    }
+
+    glss::FrameInterpolator gpu_interp(ctx);
+    CHECK(gpu_interp.Initialize(64, 48));
+    CHECK(gpu_interp.UsingGpu());
+
+    glss::FrameBuffer f0 = MakeFrame(64, 48);
+    glss::FrameBuffer f1 = MakeFrame(64, 48);
+    for (uint32_t y = 16; y < 32; ++y) {
+        for (uint32_t x = 16; x < 32; ++x) {
+            SetPixel(f0, x, y, 200, 200, 200, 255);
+            SetPixel(f1, x + 4, y, 200, 200, 200, 255);
+        }
+    }
+
+    CHECK(gpu_interp.PushSourceFrame(f0));
+    CHECK(gpu_interp.PushSourceFrame(f1));
+
+    glss::FrameBuffer interpolated;
+    CHECK(gpu_interp.GenerateInterpolatedFrame(0.5f, interpolated));
+    CHECK(interpolated.width == 64);
+    CHECK(interpolated.height == 48);
+    CHECK(interpolated.data.size() == interpolated.ByteSize());
+    CHECK(!interpolated.Empty());
+
+    std::cout << "[glss_tests] GPU frame interpolation verified successfully." << std::endl;
+}
+
 void TestHeadlessPipeline() {
     std::cout << "[glss_tests] -- headless pipeline --" << std::endl;
     glss::Config cfg;
@@ -542,6 +576,7 @@ int main() {
     TestSuperResolution();
     TestRCAS();
     TestGpuSuperResolution();
+    TestGpuFrameInterpolation();
     TestHeadlessPipeline();
     TestEnumerateDevices();
     TestWindowCapture();

@@ -9,12 +9,14 @@
 
 namespace glss {
 
-// CPU block-matching frame interpolator.
+class VulkanInterpCompute;
+
+// Pure GPU Vulkan compute & CPU block-matching frame interpolator.
 //
-// Motion estimation runs on the LUMA channel using 16x16 blocks with a +/-
-// search window (SAD metric). The recovered integer motion vectors drive a
-// motion-compensated temporal blend. The Vulkan context is accepted for source
-// compatibility but is not required by the CPU path.
+// GPU path: runs an embedded Vulkan compute shader performing motion estimation
+// and motion-compensated temporal blend directly in GPU memory.
+// CPU fallback: motion estimation on the LUMA channel using 16x16 blocks with
+// SAD metric, driving motion-compensated temporal blend.
 class FrameInterpolator {
 public:
     static constexpr uint32_t kBlockSize = 16;
@@ -34,6 +36,9 @@ public:
 
     bool HasValidHistory() const { return has_previous_frame_; }
 
+    // 是否正在使用 GPU 计算后端进行插帧
+    bool UsingGpu() const;
+
     // 运动矢量场，按块行优先排列，每个块包含 (vx, vy) 两个 float。
     const std::vector<float>& MotionVectors() const { return motion_vectors_; }
 
@@ -51,6 +56,10 @@ private:
 
     FrameBuffer prev_frame_;
     FrameBuffer curr_frame_;
+
+    // GPU 计算后端
+    std::unique_ptr<VulkanInterpCompute> gpu_;
+    bool gpu_attempted_ = false;
 
     // 运动向量场 (Motion Vector Field: vx, vy)
     std::vector<float> motion_vectors_;

@@ -6,6 +6,9 @@
 #include <iostream>
 #include <limits>
 
+#include "glss/vulkan_interp.h"
+#include "shaders/interp_spv.h"
+
 namespace glss {
 namespace {
 
@@ -58,10 +61,32 @@ bool FrameInterpolator::Initialize(uint32_t width, uint32_t height) {
     const size_t block_count = static_cast<size_t>(BlocksX()) * BlocksY();
     motion_vectors_.assign(block_count * 2, 0.0f);
 
+    if (!gpu_attempted_) {
+        gpu_attempted_ = true;
+        if (vk_ctx_ && vk_ctx_->IsAvailable()) {
+            gpu_ = std::make_unique<VulkanInterpCompute>(*vk_ctx_);
+            if (gpu_->Initialize(kInterpSpirv, kInterpSpirvSize)) {
+                std::cout << "[GLSS Interpolator] GPU 计算后端已启用 (Vulkan compute SPIR-V 插帧)。"
+                          << std::endl;
+            } else {
+                std::cout << "[GLSS Interpolator] GPU 计算后端不可用，使用 CPU 路径。"
+                          << std::endl;
+                gpu_.reset();
+            }
+        } else {
+            std::cout << "[GLSS Interpolator] Vulkan 上下文不可用，使用 CPU 路径。" << std::endl;
+        }
+    }
+
     std::cout << "[GLSS Interpolator] 帧插值引擎初始化完成 (分辨率: "
               << width << "x" << height << ", 宏块网格: "
-              << BlocksX() << "x" << BlocksY() << ")" << std::endl;
+              << BlocksX() << "x" << BlocksY() << ", 后端: "
+              << (UsingGpu() ? "GPU Vulkan" : "CPU") << ")" << std::endl;
     return true;
+}
+
+bool FrameInterpolator::UsingGpu() const {
+    return gpu_ != nullptr && gpu_->IsReady();
 }
 
 void FrameInterpolator::ComputeMotionEstimation(const FrameBuffer& prev, const FrameBuffer& curr) {
@@ -115,8 +140,6 @@ void FrameInterpolator::ComputeMotionEstimation(const FrameBuffer& prev, const F
                                             static_cast<int>(curr_row[cx]));
                         }
                     }
-                    // Tiny magnitude penalty breaks ties toward zero motion in
-                    // flat regions without meaningfully biasing textured blocks.
                     const long cost = sad + (std::abs(dx) + std::abs(dy));
                     if (cost < best_cost) {
                         best_cost = cost;
@@ -165,8 +188,6 @@ void FrameInterpolator::BlendFramesWithMotionCompensation(const FrameBuffer& f0,
             const float fx = static_cast<float>(x);
             const float fy = static_cast<float>(y);
 
-            // Motion-compensated sample locations for the previous and current
-            // frames so that both describe the same physical point at time t.
             const float sx0 = fx - t * vx;
             const float sy0 = fy - t * vy;
             const float sx1 = fx + (1.0f - t) * vx;
@@ -204,13 +225,29 @@ bool FrameInterpolator::PushSourceFrame(const FrameBuffer& frame) {
 
     prev_frame_ = std::move(curr_frame_);
     curr_frame_ = frame;
-    ComputeMotionEstimation(prev_frame_, curr_frame_);
+
+    if (!UsingGpu()) {
+        ComputeMotionEstimation(prev_frame_, curr_frame_);
+    }
     return true;
 }
 
 bool FrameInterpolator::GenerateInterpolatedFrame(float t, FrameBuffer& out_frame) {
     if (!has_previous_frame_ || prev_frame_.data.empty() || curr_frame_.data.empty()) {
         return false;
+    }
+
+    // 优先使用 GPU Vulkan 计算管线
+    if (UsingGpu()) {
+        if (gpu_->Dispatch(prev_frame_, curr_frame_, t, out_frame, 0, 4)) {
+            return true;
+        }
+        std::cerr << "[GLSS Interpolator] GPU 插帧调度失败，回退至 CPU 路径。" << std::endl;
+    }
+
+    // CPU 回退
+    if (motion_vectors_.empty() || motion_vectors_[0] == 0.0f) {
+        ComputeMotionEstimation(prev_frame_, curr_frame_);
     }
     BlendFramesWithMotionCompensation(prev_frame_, curr_frame_, t, out_frame);
     return !out_frame.data.empty();
@@ -221,6 +258,9 @@ bool FrameInterpolator::GetMotionVector(uint32_t block_x, uint32_t block_y, floa
     const uint32_t bx_count = BlocksX();
     const uint32_t by_count = BlocksY();
     if (block_x >= bx_count || block_y >= by_count) {
+        return false;
+    }
+    if (motion_vectors_.empty()) {
         return false;
     }
     const size_t idx = (static_cast<size_t>(block_y) * bx_count + block_x) * 2;
